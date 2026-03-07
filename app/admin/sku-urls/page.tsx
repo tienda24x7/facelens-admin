@@ -13,6 +13,7 @@ type Client = {
 
 type ExistingRow = {
   sku: string;
+  rb?: string;
   nombre?: string;
   url: string;
 };
@@ -43,6 +44,9 @@ type LimitPreview = {
   wouldExceedCount: number;
   exceedingSkus: string[];
 };
+
+// ✅ CAMBIAR si querés apuntar a otro dominio/base del Live
+const FACELENS_LIVE_BASE_URL = "https://facelens-live.vercel.app";
 
 function normSku(v: any) {
   return String(v ?? "").trim().toUpperCase();
@@ -147,6 +151,16 @@ function getParseStats(text: string): ParseStats {
   };
 }
 
+function buildTryOnUrl(baseUrl: string, clientSlug?: string, sku?: string) {
+  const cleanBase = String(baseUrl || "").trim().replace(/\/+$/, "");
+  const slug = String(clientSlug || "").trim();
+  const cleanSku = normSku(sku);
+
+  if (!cleanBase || !slug || !cleanSku) return "";
+
+  return `${cleanBase}/?slug=${encodeURIComponent(slug)}&sku=${encodeURIComponent(cleanSku)}`;
+}
+
 const styles = {
   page: {
     padding: 24,
@@ -213,14 +227,6 @@ const styles = {
     background: "#fff",
     color: "#111827",
     resize: "vertical" as const,
-  } as React.CSSProperties,
-
-  buttonBase: {
-    padding: "9px 14px",
-    borderRadius: 12,
-    cursor: "pointer",
-    fontWeight: 600,
-    border: "1px solid transparent",
   } as React.CSSProperties,
 
   buttonPrimary: {
@@ -309,16 +315,28 @@ const styles = {
     background: "#f9fafb",
     color: "#374151",
     fontWeight: 700,
+    whiteSpace: "nowrap" as const,
   } as React.CSSProperties,
 
   td: {
     padding: 10,
     borderBottom: "1px solid #f3f4f6",
     color: "#111827",
+    verticalAlign: "top" as const,
   } as React.CSSProperties,
 
   muted: {
     color: "#6b7280",
+  } as React.CSSProperties,
+
+  urlBox: {
+    display: "inline-block",
+    maxWidth: 360,
+    whiteSpace: "nowrap" as const,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    fontSize: 12,
+    color: "#374151",
   } as React.CSSProperties,
 };
 
@@ -342,6 +360,8 @@ export default function SkuUrlsPage() {
   const [err, setErr] = useState<string | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string>("");
 
+  const [copiedSku, setCopiedSku] = useState<string>("");
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const parsed = useMemo(() => parseBulk(paste), [paste]);
@@ -353,9 +373,10 @@ export default function SkuUrlsPage() {
 
     return existing.filter((row) => {
       const sku = String(row.sku || "").toLowerCase();
+      const rb = String(row.rb || "").toLowerCase();
       const nombre = String(row.nombre || "").toLowerCase();
       const url = String(row.url || "").toLowerCase();
-      return sku.includes(q) || nombre.includes(q) || url.includes(q);
+      return sku.includes(q) || rb.includes(q) || nombre.includes(q) || url.includes(q);
     });
   }, [existing, search]);
 
@@ -398,6 +419,27 @@ export default function SkuUrlsPage() {
       exceedingSkus,
     };
   }, [parsed, existing, planInfo]);
+
+  async function copyTryOnUrl(row: ExistingRow) {
+    try {
+      const tryOnUrl = buildTryOnUrl(
+        FACELENS_LIVE_BASE_URL,
+        selectedClient?.slug,
+        row.sku
+      );
+
+      if (!tryOnUrl) {
+        throw new Error("No se pudo generar la URL del probador.");
+      }
+
+      await navigator.clipboard.writeText(tryOnUrl);
+      setCopiedSku(row.sku);
+      setMsg(`URL del probador copiada para SKU ${row.sku}`);
+      setTimeout(() => setCopiedSku(""), 1800);
+    } catch (e: any) {
+      setErr(e?.message || "No se pudo copiar la URL del probador");
+    }
+  }
 
   async function loadClients() {
     setLoadingClients(true);
@@ -624,6 +666,11 @@ export default function SkuUrlsPage() {
             </div>
 
             <div style={styles.metricCard}>
+              <div style={styles.metricLabel}>Slug</div>
+              <div style={styles.metricValue}>{selectedClient.slug || "—"}</div>
+            </div>
+
+            <div style={styles.metricCard}>
               <div style={styles.metricLabel}>Plan</div>
               <div style={styles.metricValue}>{selectedClient.plan || "—"}</div>
             </div>
@@ -785,7 +832,7 @@ export default function SkuUrlsPage() {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por SKU, nombre o URL"
+            placeholder="Buscar por SKU, RB, nombre o URL"
             style={styles.input}
           />
         </div>
@@ -798,7 +845,7 @@ export default function SkuUrlsPage() {
           <table style={styles.table}>
             <thead>
               <tr>
-                {["sku", "nombre", "url"].map((h) => (
+                {["sku", "rb", "nombre", "url", "url_probador", "acciones"].map((h) => (
                   <th key={h} style={styles.th}>
                     {h}
                   </th>
@@ -806,24 +853,57 @@ export default function SkuUrlsPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredExisting.map((r, idx) => (
-                <tr key={`${r.sku}-${idx}`}>
-                  <td style={{ ...styles.td, fontFamily: "monospace" }}>{r.sku}</td>
-                  <td style={styles.td}>{r.nombre || ""}</td>
-                  <td style={styles.td}>
-                    {r.url ? (
-                      <a href={r.url} target="_blank" rel="noreferrer">
-                        {r.url}
-                      </a>
-                    ) : (
-                      ""
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {filteredExisting.map((r, idx) => {
+                const tryOnUrl = buildTryOnUrl(
+                  FACELENS_LIVE_BASE_URL,
+                  selectedClient?.slug,
+                  r.sku
+                );
+
+                return (
+                  <tr key={`${r.sku}-${idx}`}>
+                    <td style={{ ...styles.td, fontFamily: "monospace" }}>{r.sku}</td>
+                    <td style={{ ...styles.td, fontFamily: "monospace" }}>{r.rb || ""}</td>
+                    <td style={styles.td}>{r.nombre || ""}</td>
+                    <td style={styles.td}>
+                      {r.url ? (
+                        <a href={r.url} target="_blank" rel="noreferrer">
+                          {r.url}
+                        </a>
+                      ) : (
+                        ""
+                      )}
+                    </td>
+                    <td style={styles.td}>
+                      {tryOnUrl ? (
+                        <a
+                          href={tryOnUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={tryOnUrl}
+                          style={styles.urlBox}
+                        >
+                          {tryOnUrl}
+                        </a>
+                      ) : (
+                        <span style={styles.muted}>Sin URL</span>
+                      )}
+                    </td>
+                    <td style={styles.td}>
+                      <button
+                        onClick={() => copyTryOnUrl(r)}
+                        disabled={!tryOnUrl}
+                        style={styles.buttonSecondary}
+                      >
+                        {copiedSku === r.sku ? "Copiada" : "Copiar URL"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
               {filteredExisting.length === 0 && (
                 <tr>
-                  <td colSpan={3} style={{ ...styles.td, color: "#6b7280" }}>
+                  <td colSpan={6} style={{ ...styles.td, color: "#6b7280" }}>
                     No hay filas para mostrar con el filtro actual.
                   </td>
                 </tr>

@@ -5,6 +5,9 @@ const CLIENTS_TABLE = "clientes facelens";
 const LENSES_TABLE = "lentes";
 const MAP_TABLE = "clientes_lentes_urls";
 
+// ✅ Base real del probador
+const FACELENS_LIVE_BASE_URL = "https://facelens-live.vercel.app";
+
 function cleanStr(v: any) {
   if (v === null || v === undefined) return "";
   return String(v).trim();
@@ -21,6 +24,23 @@ function planToLimit(planRaw: any) {
   return 999999;
 }
 
+function csvCell(v: any) {
+  const s = cleanStr(v);
+  if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+    return `"${s.replaceAll('"', '""')}"`;
+  }
+  return s;
+}
+
+function buildTryOnUrl(baseUrl: string, clientSlug?: string, sku?: string) {
+  const cleanBase = cleanStr(baseUrl).replace(/\/+$/, "");
+  const slug = cleanStr(clientSlug);
+  const cleanSku = cleanStr(sku).toUpperCase();
+
+  if (!cleanBase || !slug || !cleanSku) return "";
+  return `${cleanBase}/?slug=${encodeURIComponent(slug)}&sku=${encodeURIComponent(cleanSku)}`;
+}
+
 export async function GET(req: Request) {
   try {
     const db = supabaseAdmin();
@@ -31,10 +51,10 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, error: "Falta client_id" }, { status: 400 });
     }
 
-    // 1) cliente (plan + scope)
+    // 1) cliente
     const { data: c, error: cErr } = await db
       .from(CLIENTS_TABLE)
-      .select("id, plan, catalog_scope")
+      .select("id, slug, plan, catalog_scope")
       .eq("id", client_id)
       .maybeSingle();
 
@@ -44,9 +64,14 @@ export async function GET(req: Request) {
 
     const limitByPlan = planToLimit(c.plan);
     const scope = cleanStr(c.catalog_scope).toUpperCase();
+    const clientSlug = cleanStr(c.slug);
 
     // 2) lentes permitidos por scope, limitados por plan
-    let q = db.from(LENSES_TABLE).select("id, sku, proveedor").order("sku", { ascending: true });
+    let q = db
+      .from(LENSES_TABLE)
+      .select("id, sku, rb, proveedor")
+      .order("sku", { ascending: true });
+
     if (scope && scope !== "ALL") q = q.eq("proveedor", scope);
 
     const { data: lenses, error: lErr } = await q;
@@ -69,14 +94,21 @@ export async function GET(req: Request) {
       mapByLens.set(String(r.lente_id), cleanStr(r.product_url));
     }
 
-    // 4) CSV con urls existentes (si no hay, vacío)
-    const lines: string[] = ["sku,product_url"];
+    // 4) CSV con RB + URL existente + URL probador
+    const lines: string[] = ["sku,rb,product_url,url_probador"];
+
     for (const l of allowedLimited) {
       const sku = cleanStr(l.sku);
-      const urlVal = mapByLens.get(String(l.id)) || "";
-      // escapado simple por si la url trae comas
-      const urlCsv = urlVal.includes(",") ? `"${urlVal.replaceAll('"', '""')}"` : urlVal;
-      lines.push(`${sku},${urlCsv}`);
+      const rb = cleanStr(l.rb);
+      const productUrl = mapByLens.get(String(l.id)) || "";
+      const tryOnUrl = buildTryOnUrl(FACELENS_LIVE_BASE_URL, clientSlug, sku);
+
+      lines.push([
+        csvCell(sku),
+        csvCell(rb),
+        csvCell(productUrl),
+        csvCell(tryOnUrl),
+      ].join(","));
     }
 
     const csv = lines.join("\n");

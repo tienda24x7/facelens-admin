@@ -20,6 +20,14 @@ function planToLimit(planRaw: any) {
   return 999999;
 }
 
+function csvCell(v: any) {
+  const s = cleanStr(v);
+  if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+    return `"${s.replaceAll('"', '""')}"`;
+  }
+  return s;
+}
+
 export async function GET(req: Request) {
   try {
     const db = supabaseAdmin();
@@ -45,19 +53,31 @@ export async function GET(req: Request) {
     const scope = cleanStr(c.catalog_scope).toUpperCase();
 
     // Lentes permitidos por scope
-    let q = db.from(LENSES_TABLE).select("sku, proveedor").order("sku", { ascending: true });
+    let q = db
+      .from(LENSES_TABLE)
+      .select("sku, rb, proveedor")
+      .order("sku", { ascending: true });
+
     if (scope && scope !== "ALL") q = q.eq("proveedor", scope);
 
     const { data: lenses, error: lErr } = await q;
     if (lErr) return NextResponse.json({ ok: false, error: lErr.message }, { status: 400 });
 
-    const skus = (lenses || [])
-      .map((x: any) => cleanStr(x.sku))
-      .filter((s: string) => s !== "")
+    const allowed = (lenses || [])
+      .filter((x: any) => cleanStr(x.sku) !== "")
       .slice(0, limitByPlan);
 
-    // CSV (sku,product_url)
-    const lines = ["sku,product_url", ...skus.map((s: string) => `${s},`)];
+    // CSV plantilla (sku,rb,product_url)
+    const lines = ["sku,rb,product_url"];
+
+    for (const lens of allowed) {
+      lines.push([
+        csvCell(lens.sku),
+        csvCell(lens.rb),
+        ""
+      ].join(","));
+    }
+
     const csv = lines.join("\n");
 
     return new NextResponse(csv, {

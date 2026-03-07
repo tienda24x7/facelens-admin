@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 const TABLE = "clientes facelens";
+const TOKENS_TABLE = "client_metrics_tokens";
 
 function cleanStr(v: any) {
   if (v === null || v === undefined) return null;
@@ -10,7 +11,6 @@ function cleanStr(v: any) {
 }
 
 function isValidSlug(slug: string) {
-  // simple: letras/números/_/-
   return /^[a-zA-Z0-9_-]+$/.test(slug);
 }
 
@@ -18,14 +18,46 @@ export async function GET() {
   try {
     const db = supabaseAdmin();
 
-    const { data, error } = await db
+    const { data: clients, error: clientsError } = await db
       .from(TABLE)
       .select("*")
       .order("nombre", { ascending: true });
 
-    if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    if (clientsError) {
+      return NextResponse.json(
+        { ok: false, error: clientsError.message },
+        { status: 500 }
+      );
     }
+
+    const slugs = (clients || [])
+      .map((c: any) => cleanStr(c.slug))
+      .filter(Boolean);
+
+    let tokenBySlug = new Map<string, string>();
+
+    if (slugs.length > 0) {
+      const { data: tokens, error: tokensError } = await db
+        .from(TOKENS_TABLE)
+        .select("slug, token")
+        .in("slug", slugs);
+
+      if (tokensError) {
+        return NextResponse.json(
+          { ok: false, error: tokensError.message },
+          { status: 500 }
+        );
+      }
+
+      tokenBySlug = new Map(
+        (tokens || []).map((t: any) => [String(t.slug).trim(), String(t.token || "").trim()])
+      );
+    }
+
+    const data = (clients || []).map((client: any) => ({
+      ...client,
+      metrics_token: tokenBySlug.get(String(client.slug || "").trim()) || null,
+    }));
 
     return NextResponse.json({ ok: true, data }, { status: 200 });
   } catch (e: any) {
@@ -44,7 +76,6 @@ export async function POST(req: Request) {
     const nombre = cleanStr(body.nombre);
     const slug = cleanStr(body.slug);
 
-    // ✅ Validaciones mínimas
     if (!nombre || !slug) {
       return NextResponse.json(
         { ok: false, error: "Falta nombre o slug" },
@@ -63,7 +94,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ Chequeo slug duplicado
     const { data: existing, error: e1 } = await db
       .from(TABLE)
       .select("id")
@@ -81,14 +111,12 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ Campos permitidos (whitelist) + limpieza
-    // IMPORTANTE: logo_url NO puede ser null (tu tabla tiene NOT NULL)
     const payload: any = {
       nombre,
       slug,
-      logo_url: cleanStr(body.logo_url) ?? "", // ✅ evita null (manda "" si falta)
+      logo_url: cleanStr(body.logo_url) ?? "",
       color_primario: cleanStr(body.color_primario),
-      olor_secundario: cleanStr(body.olor_secundario), // viene así en tu schema/json
+      olor_secundario: cleanStr(body.olor_secundario),
       activo: body.activo ?? true,
       plan: cleanStr(body.plan),
       whatsapp: cleanStr(body.whatsapp),

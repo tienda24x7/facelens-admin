@@ -15,7 +15,18 @@ type ClientRow = {
   catalog_slug?: string | null;
   catalog_scope?: string | null;
   default_url?: string | null;
+  metrics_token?: string | null;
 };
+
+type PlanRow = {
+  plan_code?: string;
+  max_urls?: number | null;
+  created_at?: string;
+};
+
+const FACELENS_LIVE_BASE_URL = "https://facelens-live.vercel.app";
+const FACELENS_PANEL_BASE_URL = "https://facelens-panel.vercel.app";
+const CATALOG_SCOPE_OPTIONS = ["ALL", "NICOLAS", "EZEQUIEL"];
 
 function slugify(v: string) {
   return (v || "")
@@ -27,6 +38,32 @@ function slugify(v: string) {
     .replace(/[^a-z0-9_-]/g, "")
     .replace(/_+/g, "_")
     .replace(/^_+|_+$/g, "");
+}
+
+function cleanStr(v: any) {
+  return String(v ?? "").trim();
+}
+
+function buildAppUrl(slug?: string) {
+  const s = cleanStr(slug);
+  if (!s) return "";
+  return `${FACELENS_LIVE_BASE_URL}/?slug=${encodeURIComponent(s)}`;
+}
+
+function isPrimePlan(plan?: string | null) {
+  return cleanStr(plan).toUpperCase().includes("PRIME");
+}
+
+function buildDashboardUrl(
+  slug?: string,
+  plan?: string | null,
+  metricsToken?: string | null
+) {
+  if (!isPrimePlan(plan)) return "";
+  const s = cleanStr(slug);
+  const t = cleanStr(metricsToken);
+  if (!s || !t) return "";
+  return `${FACELENS_PANEL_BASE_URL}/?slug=${encodeURIComponent(s)}&t=${encodeURIComponent(t)}&days=30`;
 }
 
 const styles = {
@@ -85,6 +122,14 @@ const styles = {
     color: "#111827",
   } as React.CSSProperties,
 
+  select: {
+    padding: 9,
+    borderRadius: 10,
+    border: "1px solid #d1d5db",
+    background: "#fff",
+    color: "#111827",
+  } as React.CSSProperties,
+
   checkboxLabel: {
     display: "inline-flex",
     gap: 8,
@@ -120,25 +165,6 @@ const styles = {
     border: "1px solid #d1d5db",
     background: "#fff",
     color: "#374151",
-  } as React.CSSProperties,
-
-  metricCard: {
-    padding: 12,
-    border: "1px solid #e5e7eb",
-    borderRadius: 14,
-    background: "#fbfcfe",
-    minWidth: 130,
-  } as React.CSSProperties,
-
-  metricLabel: {
-    color: "#6b7280",
-    fontSize: 13,
-    marginBottom: 4,
-  } as React.CSSProperties,
-
-  metricValue: {
-    fontWeight: 700,
-    color: "#111827",
   } as React.CSSProperties,
 
   infoOk: {
@@ -191,10 +217,20 @@ const styles = {
     color: "#111827",
     verticalAlign: "top" as const,
   } as React.CSSProperties,
+
+  linkBox: {
+    display: "inline-block",
+    maxWidth: 260,
+    whiteSpace: "nowrap" as const,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    fontSize: 12,
+  } as React.CSSProperties,
 };
 
 export default function ClientsPage() {
   const [rows, setRows] = useState<ClientRow[]>([]);
+  const [plans, setPlans] = useState<PlanRow[]>([]);
   const [draft, setDraft] = useState<Record<string, Partial<ClientRow>>>({});
   const [err, setErr] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -203,6 +239,8 @@ export default function ClientsPage() {
 
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [logoFileById, setLogoFileById] = useState<Record<string, File | null>>({});
+
+  const [copiedKey, setCopiedKey] = useState<string>("");
 
   const [creating, setCreating] = useState(false);
   const [createForm, setCreateForm] = useState<{
@@ -222,8 +260,8 @@ export default function ClientsPage() {
   }>({
     nombre: "",
     slug: "",
-    plan: "ALL",
-    catalog_scope: "",
+    plan: "",
+    catalog_scope: "ALL",
     catalog_slug: "catalogo_global",
     whatsapp: "",
     default_url: "",
@@ -235,9 +273,36 @@ export default function ClientsPage() {
     slugTouched: false,
   });
 
+  const planOptions = useMemo(() => {
+    return (plans || []).map((p) => cleanStr(p.plan_code)).filter(Boolean);
+  }, [plans]);
+
   const hasDraft = useMemo(() => {
     return Object.keys(draft).some((id) => Object.keys(draft[id] || {}).length > 0);
   }, [draft]);
+
+  async function copyText(value: string, key: string, okMsg: string) {
+    try {
+      if (!value) throw new Error("No hay link para copiar.");
+      await navigator.clipboard.writeText(value);
+      setCopiedKey(key);
+      setInfo(okMsg);
+      setTimeout(() => setCopiedKey(""), 1800);
+    } catch (e: any) {
+      setErr(e?.message || "No se pudo copiar");
+    }
+  }
+
+  async function loadPlans() {
+    try {
+      const r = await fetch("/api/admin/plans", { cache: "no-store" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j?.ok) throw new Error(j?.error || "Error cargando planes");
+      setPlans(j.data || []);
+    } catch (e: any) {
+      setErr(e?.message || "Error cargando planes");
+    }
+  }
 
   async function load() {
     setLoading(true);
@@ -387,17 +452,21 @@ export default function ClientsPage() {
       if (!r.ok || !j?.ok) throw new Error(j?.error || "Error creando cliente");
 
       setInfo("✅ Cliente creado.");
-      setCreateForm((prev) => ({
-        ...prev,
+      setCreateForm({
         nombre: "",
         slug: "",
+        plan: planOptions[0] || "",
+        catalog_scope: "ALL",
+        catalog_slug: "catalogo_global",
         whatsapp: "",
         default_url: "",
+        activo: true,
         logo_url: "",
         sin_logo: false,
-        activo: true,
+        color_primario: "#111111",
+        olor_secundario: "#0F0F0F",
         slugTouched: false,
-      }));
+      });
 
       await load();
     } catch (e: any) {
@@ -409,7 +478,14 @@ export default function ClientsPage() {
 
   useEffect(() => {
     load();
+    loadPlans();
   }, []);
+
+  useEffect(() => {
+    if (!createForm.plan && planOptions.length > 0) {
+      setCreateForm((prev) => ({ ...prev, plan: planOptions[0] }));
+    }
+  }, [planOptions, createForm.plan]);
 
   return (
     <div style={styles.page}>
@@ -455,24 +531,38 @@ export default function ClientsPage() {
             </div>
           </div>
 
-          <div style={{ ...styles.fieldWrap, minWidth: 150 }}>
+          <div style={{ ...styles.fieldWrap, minWidth: 170 }}>
             <div style={styles.label}>plan</div>
-            <input
+            <select
               value={createForm.plan}
               onChange={(e) => setCreateForm((p) => ({ ...p, plan: e.target.value }))}
-              style={{ ...styles.input, width: 150 }}
-              placeholder="ALL / GO150 / etc"
-            />
+              style={{ ...styles.select, width: 170 }}
+            >
+              {planOptions.length === 0 ? (
+                <option value="">Sin planes</option>
+              ) : (
+                planOptions.map((plan) => (
+                  <option key={plan} value={plan}>
+                    {plan}
+                  </option>
+                ))
+              )}
+            </select>
           </div>
 
           <div style={{ ...styles.fieldWrap, minWidth: 170 }}>
             <div style={styles.label}>catalog_scope</div>
-            <input
+            <select
               value={createForm.catalog_scope}
               onChange={(e) => setCreateForm((p) => ({ ...p, catalog_scope: e.target.value }))}
-              style={{ ...styles.input, width: 170 }}
-              placeholder="ALL / NICOLAS / etc"
-            />
+              style={{ ...styles.select, width: 170 }}
+            >
+              {CATALOG_SCOPE_OPTIONS.map((scope) => (
+                <option key={scope} value={scope}>
+                  {scope}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div style={{ ...styles.fieldWrap, minWidth: 190 }}>
@@ -618,6 +708,8 @@ export default function ClientsPage() {
                   "nombre",
                   "slug",
                   "plan",
+                  "link_app",
+                  "link_metricas",
                   "catalog_scope",
                   "catalog_slug",
                   "whatsapp",
@@ -634,135 +726,218 @@ export default function ClientsPage() {
             </thead>
 
             <tbody>
-              {rows.map((r) => (
-                <tr key={r.id}>
-                  <td style={{ ...styles.td, fontFamily: "monospace", whiteSpace: "nowrap" }}>{r.id}</td>
+              {rows.map((r) => {
+                const appUrl = buildAppUrl(String(getValue(r, "slug") ?? ""));
+                const dashboardUrl = buildDashboardUrl(
+                  String(getValue(r, "slug") ?? ""),
+                  String(getValue(r, "plan") ?? ""),
+                  String(getValue(r, "metrics_token") ?? "")
+                );
 
-                  <td style={styles.td}>
-                    <input
-                      value={getValue(r, "nombre") ?? ""}
-                      onChange={(e) => setField(r.id, "nombre", e.target.value)}
-                      style={{ ...styles.input, width: 220 }}
-                    />
-                  </td>
+                return (
+                  <tr key={r.id}>
+                    <td style={{ ...styles.td, fontFamily: "monospace", whiteSpace: "nowrap" }}>{r.id}</td>
 
-                  <td style={styles.td}>
-                    <input
-                      value={getValue(r, "slug") ?? ""}
-                      onChange={(e) => setField(r.id, "slug", e.target.value)}
-                      style={{ ...styles.input, width: 200 }}
-                    />
-                  </td>
-
-                  <td style={styles.td}>
-                    <input
-                      value={getValue(r, "plan") ?? ""}
-                      onChange={(e) => setField(r.id, "plan", e.target.value)}
-                      style={{ ...styles.input, width: 110 }}
-                    />
-                  </td>
-
-                  <td style={styles.td}>
-                    <input
-                      value={getValue(r, "catalog_scope") ?? ""}
-                      onChange={(e) => setField(r.id, "catalog_scope", e.target.value)}
-                      style={{ ...styles.input, width: 140 }}
-                    />
-                  </td>
-
-                  <td style={styles.td}>
-                    <input
-                      value={getValue(r, "catalog_slug") ?? ""}
-                      onChange={(e) => setField(r.id, "catalog_slug", e.target.value)}
-                      style={{ ...styles.input, width: 160 }}
-                    />
-                  </td>
-
-                  <td style={styles.td}>
-                    <input
-                      value={getValue(r, "whatsapp") ?? ""}
-                      onChange={(e) => setField(r.id, "whatsapp", e.target.value)}
-                      style={{ ...styles.input, width: 160 }}
-                    />
-                  </td>
-
-                  <td style={styles.td}>
-                    <input
-                      value={getValue(r, "default_url") ?? ""}
-                      onChange={(e) => setField(r.id, "default_url", e.target.value)}
-                      style={{ ...styles.input, width: 320 }}
-                    />
-                  </td>
-
-                  <td style={styles.td}>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      <div style={{ ...styles.row, alignItems: "center" }}>
-                        <input
-                          type="file"
-                          accept="image/png,image/jpeg,image/webp"
-                          onChange={(e) => {
-                            const f = e.target.files?.[0] || null;
-                            setLogoFileById((prev) => ({ ...prev, [r.id]: f }));
-                          }}
-                          style={{ maxWidth: 180 }}
-                        />
-                        <button
-                          onClick={() => uploadLogoForClient(r.id)}
-                          disabled={uploadingId === r.id || !logoFileById[r.id]}
-                          style={{
-                            ...styles.buttonSecondary,
-                            padding: "7px 12px",
-                            opacity: uploadingId === r.id ? 0.7 : 1,
-                            cursor: uploadingId === r.id ? "wait" : "pointer",
-                          }}
-                        >
-                          {uploadingId === r.id ? "Subiendo..." : "Subir logo"}
-                        </button>
-                      </div>
-
-                      {r.logo_url ? (
-                        <a href={r.logo_url} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>
-                          Ver logo
-                        </a>
-                      ) : (
-                        <span style={{ fontSize: 12, color: "#6b7280" }}>Sin logo</span>
-                      )}
-
-                      {draft[r.id]?.logo_url ? (
-                        <div style={{ fontSize: 12, color: "#6b7280" }}>
-                          (pendiente guardar logo_url en draft)
-                        </div>
-                      ) : null}
-                    </div>
-                  </td>
-
-                  <td style={styles.td}>
-                    <label style={styles.checkboxLabel}>
+                    <td style={styles.td}>
                       <input
-                        type="checkbox"
-                        checked={!!getValue(r, "activo")}
-                        onChange={(e) => setField(r.id, "activo", e.target.checked)}
+                        value={getValue(r, "nombre") ?? ""}
+                        onChange={(e) => setField(r.id, "nombre", e.target.value)}
+                        style={{ ...styles.input, width: 220 }}
                       />
-                      {getValue(r, "activo") ? "✅" : "❌"}
-                    </label>
-                  </td>
+                    </td>
 
-                  <td style={styles.td}>
-                    <button
-                      onClick={() => saveRow(r.id)}
-                      disabled={savingId === r.id || Object.keys(draft[r.id] || {}).length === 0}
-                      style={{
-                        ...styles.buttonSuccess,
-                        padding: "7px 12px",
-                        opacity: savingId === r.id ? 0.7 : 1,
-                        cursor: savingId === r.id ? "wait" : "pointer",
-                      }}
-                    >
-                      {savingId === r.id ? "Guardando..." : "Guardar"}
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                    <td style={styles.td}>
+                      <input
+                        value={getValue(r, "slug") ?? ""}
+                        onChange={(e) => setField(r.id, "slug", e.target.value)}
+                        style={{ ...styles.input, width: 200 }}
+                      />
+                    </td>
+
+                    <td style={styles.td}>
+                      <select
+                        value={String(getValue(r, "plan") ?? "")}
+                        onChange={(e) => setField(r.id, "plan", e.target.value)}
+                        style={{ ...styles.select, width: 150 }}
+                      >
+                        {planOptions.length === 0 ? (
+                          <option value="">Sin planes</option>
+                        ) : (
+                          planOptions.map((plan) => (
+                            <option key={plan} value={plan}>
+                              {plan}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </td>
+
+                    <td style={styles.td}>
+                      {appUrl ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          <a
+                            href={appUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={appUrl}
+                            style={styles.linkBox}
+                          >
+                            {appUrl}
+                          </a>
+                          <button
+                            onClick={() =>
+                              copyText(appUrl, `app-${r.id}`, `✅ Link app copiado para ${r.nombre || r.slug || r.id}`)
+                            }
+                            style={{ ...styles.buttonSecondary, padding: "7px 12px" }}
+                          >
+                            {copiedKey === `app-${r.id}` ? "Copiado" : "Copiar"}
+                          </button>
+                        </div>
+                      ) : (
+                        <span style={styles.muted}>Sin slug</span>
+                      )}
+                    </td>
+
+                    <td style={styles.td}>
+                      {dashboardUrl ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          <a
+                            href={dashboardUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={dashboardUrl}
+                            style={styles.linkBox}
+                          >
+                            {dashboardUrl}
+                          </a>
+                          <button
+                            onClick={() =>
+                              copyText(
+                                dashboardUrl,
+                                `dash-${r.id}`,
+                                `✅ Link métricas copiado para ${r.nombre || r.slug || r.id}`
+                              )
+                            }
+                            style={{ ...styles.buttonSecondary, padding: "7px 12px" }}
+                          >
+                            {copiedKey === `dash-${r.id}` ? "Copiado" : "Copiar"}
+                          </button>
+                        </div>
+                      ) : isPrimePlan(String(getValue(r, "plan") ?? "")) ? (
+                        <span style={styles.muted}>Falta token métricas</span>
+                      ) : (
+                        <span style={styles.muted}>Solo planes PRIME</span>
+                      )}
+                    </td>
+
+                    <td style={styles.td}>
+                      <select
+                        value={String(getValue(r, "catalog_scope") ?? "ALL")}
+                        onChange={(e) => setField(r.id, "catalog_scope", e.target.value)}
+                        style={{ ...styles.select, width: 150 }}
+                      >
+                        {CATALOG_SCOPE_OPTIONS.map((scope) => (
+                          <option key={scope} value={scope}>
+                            {scope}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+
+                    <td style={styles.td}>
+                      <input
+                        value={getValue(r, "catalog_slug") ?? ""}
+                        onChange={(e) => setField(r.id, "catalog_slug", e.target.value)}
+                        style={{ ...styles.input, width: 160 }}
+                      />
+                    </td>
+
+                    <td style={styles.td}>
+                      <input
+                        value={getValue(r, "whatsapp") ?? ""}
+                        onChange={(e) => setField(r.id, "whatsapp", e.target.value)}
+                        style={{ ...styles.input, width: 160 }}
+                      />
+                    </td>
+
+                    <td style={styles.td}>
+                      <input
+                        value={getValue(r, "default_url") ?? ""}
+                        onChange={(e) => setField(r.id, "default_url", e.target.value)}
+                        style={{ ...styles.input, width: 320 }}
+                      />
+                    </td>
+
+                    <td style={styles.td}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        <div style={{ ...styles.row, alignItems: "center" }}>
+                          <input
+                            type="file"
+                            accept="image/png,image/jpeg,image/webp"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0] || null;
+                              setLogoFileById((prev) => ({ ...prev, [r.id]: f }));
+                            }}
+                            style={{ maxWidth: 180 }}
+                          />
+                          <button
+                            onClick={() => uploadLogoForClient(r.id)}
+                            disabled={uploadingId === r.id || !logoFileById[r.id]}
+                            style={{
+                              ...styles.buttonSecondary,
+                              padding: "7px 12px",
+                              opacity: uploadingId === r.id ? 0.7 : 1,
+                              cursor: uploadingId === r.id ? "wait" : "pointer",
+                            }}
+                          >
+                            {uploadingId === r.id ? "Subiendo..." : "Subir logo"}
+                          </button>
+                        </div>
+
+                        {r.logo_url ? (
+                          <a href={r.logo_url} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>
+                            Ver logo
+                          </a>
+                        ) : (
+                          <span style={{ fontSize: 12, color: "#6b7280" }}>Sin logo</span>
+                        )}
+
+                        {draft[r.id]?.logo_url ? (
+                          <div style={{ fontSize: 12, color: "#6b7280" }}>
+                            (pendiente guardar logo_url en draft)
+                          </div>
+                        ) : null}
+                      </div>
+                    </td>
+
+                    <td style={styles.td}>
+                      <label style={styles.checkboxLabel}>
+                        <input
+                          type="checkbox"
+                          checked={!!getValue(r, "activo")}
+                          onChange={(e) => setField(r.id, "activo", e.target.checked)}
+                        />
+                        {getValue(r, "activo") ? "✅" : "❌"}
+                      </label>
+                    </td>
+
+                    <td style={styles.td}>
+                      <button
+                        onClick={() => saveRow(r.id)}
+                        disabled={savingId === r.id || Object.keys(draft[r.id] || {}).length === 0}
+                        style={{
+                          ...styles.buttonSuccess,
+                          padding: "7px 12px",
+                          opacity: savingId === r.id ? 0.7 : 1,
+                          cursor: savingId === r.id ? "wait" : "pointer",
+                        }}
+                      >
+                        {savingId === r.id ? "Guardando..." : "Guardar"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

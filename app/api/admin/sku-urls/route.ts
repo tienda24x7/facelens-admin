@@ -81,7 +81,7 @@ export async function GET(req: NextRequest) {
 
     const { data: allowedRows, error: allowedErr } = await supabase
       .from("v_lentes_por_cliente")
-      .select("sku, nombre_modelo, client_slug")
+      .select("sku, rb, nombre_modelo, client_slug")
       .eq("client_slug", client.slug);
 
     if (allowedErr) {
@@ -137,6 +137,7 @@ export async function GET(req: NextRequest) {
       const lente_id = lensIdBySku.get(sku) || "";
       return {
         sku,
+        rb: String(r.rb || "").trim(),
         nombre: r.nombre_modelo || "",
         url: lente_id ? savedMapByLenteId.get(lente_id) || "" : "",
       };
