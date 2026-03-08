@@ -119,6 +119,7 @@ export async function POST(req: Request) {
       olor_secundario: cleanStr(body.olor_secundario),
       activo: body.activo ?? true,
       plan: cleanStr(body.plan),
+      comercial: cleanStr(body.comercial),
       whatsapp: cleanStr(body.whatsapp),
       catalog_slug: cleanStr(body.catalog_slug),
       catalog_scope: cleanStr(body.catalog_scope),

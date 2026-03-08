@@ -12,6 +12,7 @@ const ALLOWED = new Set([
   "olor_secundario", // está así en tu DB/json
   "activo",
   "plan",
+  "comercial",
   "whatsapp",
   "catalog_slug",
   "catalog_scope",
@@ -29,14 +30,17 @@ function pickAllowed(obj: any) {
 
 export async function PATCH(
   req: Request,
-  ctx: { params: Promise<{ id: string }> } // 👈 Next 16
+  ctx: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await ctx.params; // 👈 FIX
+    const { id } = await ctx.params;
     const patchRaw = await req.json().catch(() => ({}));
     const patch = pickAllowed(patchRaw);
 
-    if (!id) return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
+    if (!id) {
+      return NextResponse.json({ ok: false, error: "Missing id" }, { status: 400 });
+    }
+
     if (!Object.keys(patch).length) {
       return NextResponse.json({ ok: false, error: "Empty patch" }, { status: 400 });
     }
@@ -50,7 +54,10 @@ export async function PATCH(
       .select("*")
       .single();
 
-    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    }
+
     return NextResponse.json({ ok: true, data }, { status: 200 });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: e?.message || "Error" }, { status: 500 });

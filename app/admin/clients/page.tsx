@@ -11,6 +11,7 @@ type ClientRow = {
   olor_secundario?: string;
   activo?: boolean;
   plan?: string;
+  comercial?: string | null;
   whatsapp?: string | null;
   catalog_slug?: string | null;
   catalog_scope?: string | null;
@@ -247,12 +248,14 @@ export default function ClientsPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [planFilter, setPlanFilter] = useState("all");
+  const [comercialFilter, setComercialFilter] = useState("all");
 
   const [creating, setCreating] = useState(false);
   const [createForm, setCreateForm] = useState<{
     nombre: string;
     slug: string;
     plan: string;
+    comercial: string;
     catalog_scope: string;
     catalog_slug: string;
     whatsapp: string;
@@ -267,6 +270,7 @@ export default function ClientsPage() {
     nombre: "",
     slug: "",
     plan: "",
+    comercial: "",
     catalog_scope: "ALL",
     catalog_slug: "catalogo_global",
     whatsapp: "",
@@ -283,6 +287,17 @@ export default function ClientsPage() {
     return (plans || []).map((p) => cleanStr(p.plan_code)).filter(Boolean);
   }, [plans]);
 
+  const comercialOptions = useMemo(() => {
+    const values = new Set<string>();
+
+    rows.forEach((r) => {
+      const current = cleanStr(getValue(r, "comercial"));
+      if (current) values.add(current);
+    });
+
+    return Array.from(values).sort((a, b) => a.localeCompare(b, "es"));
+  }, [rows, draft]);
+
   const hasDraft = useMemo(() => {
     return Object.keys(draft).some((id) => Object.keys(draft[id] || {}).length > 0);
   }, [draft]);
@@ -294,6 +309,7 @@ export default function ClientsPage() {
       const currentNombre = cleanStr(getValue(r, "nombre")).toLowerCase();
       const currentSlug = cleanStr(getValue(r, "slug")).toLowerCase();
       const currentPlan = cleanStr(getValue(r, "plan"));
+      const currentComercial = cleanStr(getValue(r, "comercial"));
       const currentActivo = !!getValue(r, "activo");
 
       const matchesStatus =
@@ -304,14 +320,17 @@ export default function ClientsPage() {
       const matchesPlan =
         planFilter === "all" || cleanStr(currentPlan) === cleanStr(planFilter);
 
+      const matchesComercial =
+        comercialFilter === "all" || cleanStr(currentComercial) === cleanStr(comercialFilter);
+
       const matchesSearch =
         !search ||
         currentNombre.includes(search) ||
         currentSlug.includes(search);
 
-      return matchesStatus && matchesPlan && matchesSearch;
+      return matchesStatus && matchesPlan && matchesComercial && matchesSearch;
     });
-  }, [rows, draft, statusFilter, planFilter, searchTerm]);
+  }, [rows, draft, statusFilter, planFilter, comercialFilter, searchTerm]);
 
   async function copyText(value: string, key: string, okMsg: string) {
     try {
@@ -464,6 +483,7 @@ export default function ClientsPage() {
         nombre,
         slug,
         plan: createForm.plan.trim() || null,
+        comercial: createForm.comercial.trim() || null,
         catalog_scope: createForm.catalog_scope.trim() || null,
         catalog_slug: createForm.catalog_slug.trim() || null,
         whatsapp: createForm.whatsapp.trim() || null,
@@ -488,6 +508,7 @@ export default function ClientsPage() {
         nombre: "",
         slug: "",
         plan: planOptions[0] || "",
+        comercial: "",
         catalog_scope: "ALL",
         catalog_slug: "catalogo_global",
         whatsapp: "",
@@ -580,6 +601,16 @@ export default function ClientsPage() {
                 ))
               )}
             </select>
+          </div>
+
+          <div style={{ ...styles.fieldWrap, minWidth: 220 }}>
+            <div style={styles.label}>comercial</div>
+            <input
+              value={createForm.comercial}
+              onChange={(e) => setCreateForm((p) => ({ ...p, comercial: e.target.value }))}
+              style={{ ...styles.input, width: 220 }}
+              placeholder="Ej: Juan Pérez"
+            />
           </div>
 
           <div style={{ ...styles.fieldWrap, minWidth: 170 }}>
@@ -772,6 +803,22 @@ export default function ClientsPage() {
             </select>
           </div>
 
+          <div style={{ ...styles.fieldWrap, minWidth: 220 }}>
+            <div style={styles.label}>Comercial</div>
+            <select
+              value={comercialFilter}
+              onChange={(e) => setComercialFilter(e.target.value)}
+              style={{ ...styles.select, width: 220 }}
+            >
+              <option value="all">Todos los comerciales</option>
+              {comercialOptions.map((comercial) => (
+                <option key={comercial} value={comercial}>
+                  {comercial}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div style={{ ...styles.fieldWrap, minWidth: 260, flex: "1 1 280px" }}>
             <div style={styles.label}>Buscar por nombre o slug</div>
             <input
@@ -786,6 +833,7 @@ export default function ClientsPage() {
             onClick={() => {
               setStatusFilter("all");
               setPlanFilter("all");
+              setComercialFilter("all");
               setSearchTerm("");
             }}
             style={styles.buttonSecondary}
@@ -803,6 +851,7 @@ export default function ClientsPage() {
                   "nombre",
                   "slug",
                   "plan",
+                  "comercial",
                   "link_app",
                   "link_metricas",
                   "catalog_scope",
@@ -865,6 +914,15 @@ export default function ClientsPage() {
                           ))
                         )}
                       </select>
+                    </td>
+
+                    <td style={styles.td}>
+                      <input
+                        value={getValue(r, "comercial") ?? ""}
+                        onChange={(e) => setField(r.id, "comercial", e.target.value)}
+                        style={{ ...styles.input, width: 180 }}
+                        placeholder="Sin asignar"
+                      />
                     </td>
 
                     <td style={styles.td}>
@@ -1036,7 +1094,7 @@ export default function ClientsPage() {
 
               {filteredRows.length === 0 && (
                 <tr>
-                  <td style={{ ...styles.td, textAlign: "center", color: "#6b7280", padding: 24 }} colSpan={13}>
+                  <td style={{ ...styles.td, textAlign: "center", color: "#6b7280", padding: 24 }} colSpan={14}>
                     No hay clientes que coincidan con los filtros aplicados.
                   </td>
                 </tr>
