@@ -15,6 +15,58 @@ function escapeCsv(value: any) {
   return s;
 }
 
+function slugifyPart(value: string) {
+  return cleanStr(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_-]/g, "")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function buildFilename(params: {
+  status: string;
+  plan: string;
+  comercial: string;
+  search: string;
+}) {
+  const parts = ["clientes"];
+
+  if (params.plan && params.plan !== "all") {
+    parts.push(slugifyPart(params.plan));
+  } else {
+    parts.push("todos_los_planes");
+  }
+
+  if (params.comercial && params.comercial !== "all") {
+    parts.push(slugifyPart(params.comercial));
+  } else {
+    parts.push("todos_los_comerciales");
+  }
+
+  if (params.status === "active") {
+    parts.push("activos");
+  } else if (params.status === "inactive") {
+    parts.push("inactivos");
+  } else {
+    parts.push("todos");
+  }
+
+  if (params.search) {
+    const s = slugifyPart(params.search);
+    if (s) parts.push(`busqueda_${s}`);
+  }
+
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+
+  return `${parts.join("_")}_${yyyy}-${mm}-${dd}.csv`;
+}
+
 export async function GET(req: Request) {
   try {
     const db = supabaseAdmin();
@@ -75,12 +127,18 @@ export async function GET(req: Request) {
     ];
 
     const csv = lines.join("\n");
+    const filename = buildFilename({
+      status,
+      plan,
+      comercial,
+      search,
+    });
 
     return new Response(csv, {
       status: 200,
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": 'attachment; filename="clientes_comerciales.csv"',
+        "Content-Disposition": `attachment; filename="${filename}"`,
         "Cache-Control": "no-store",
       },
     });
