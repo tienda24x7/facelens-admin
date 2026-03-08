@@ -24,6 +24,8 @@ type PlanRow = {
   created_at?: string;
 };
 
+type StatusFilter = "all" | "active" | "inactive";
+
 const FACELENS_LIVE_BASE_URL = "https://facelens-live.vercel.app";
 const FACELENS_PANEL_BASE_URL = "https://facelens-panel.vercel.app";
 const CATALOG_SCOPE_OPTIONS = ["ALL", "NICOLAS", "EZEQUIEL"];
@@ -242,6 +244,10 @@ export default function ClientsPage() {
 
   const [copiedKey, setCopiedKey] = useState<string>("");
 
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [planFilter, setPlanFilter] = useState("all");
+
   const [creating, setCreating] = useState(false);
   const [createForm, setCreateForm] = useState<{
     nombre: string;
@@ -280,6 +286,32 @@ export default function ClientsPage() {
   const hasDraft = useMemo(() => {
     return Object.keys(draft).some((id) => Object.keys(draft[id] || {}).length > 0);
   }, [draft]);
+
+  const filteredRows = useMemo(() => {
+    const search = cleanStr(searchTerm).toLowerCase();
+
+    return rows.filter((r) => {
+      const currentNombre = cleanStr(getValue(r, "nombre")).toLowerCase();
+      const currentSlug = cleanStr(getValue(r, "slug")).toLowerCase();
+      const currentPlan = cleanStr(getValue(r, "plan"));
+      const currentActivo = !!getValue(r, "activo");
+
+      const matchesStatus =
+        statusFilter === "all" ||
+        (statusFilter === "active" && currentActivo) ||
+        (statusFilter === "inactive" && !currentActivo);
+
+      const matchesPlan =
+        planFilter === "all" || cleanStr(currentPlan) === cleanStr(planFilter);
+
+      const matchesSearch =
+        !search ||
+        currentNombre.includes(search) ||
+        currentSlug.includes(search);
+
+      return matchesStatus && matchesPlan && matchesSearch;
+    });
+  }, [rows, draft, statusFilter, planFilter, searchTerm]);
 
   async function copyText(value: string, key: string, okMsg: string) {
     try {
@@ -694,9 +726,72 @@ export default function ClientsPage() {
             </button>
 
             <div style={styles.muted}>Total: {rows.length}</div>
+            <div style={styles.muted}>Visibles: {filteredRows.length}</div>
 
             {hasDraft && <div style={{ color: "#b45309", fontWeight: 600 }}>Tenés cambios sin guardar.</div>}
           </div>
+        </div>
+
+        <div
+          style={{
+            ...styles.row,
+            marginBottom: 14,
+            padding: 12,
+            border: "1px solid #e5e7eb",
+            borderRadius: 14,
+            background: "#f9fafb",
+            alignItems: "flex-end",
+          }}
+        >
+          <div style={{ ...styles.fieldWrap, minWidth: 200 }}>
+            <div style={styles.label}>Estado</div>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+              style={{ ...styles.select, width: 200 }}
+            >
+              <option value="all">Todos</option>
+              <option value="active">Activos</option>
+              <option value="inactive">Inactivos</option>
+            </select>
+          </div>
+
+          <div style={{ ...styles.fieldWrap, minWidth: 220 }}>
+            <div style={styles.label}>Plan</div>
+            <select
+              value={planFilter}
+              onChange={(e) => setPlanFilter(e.target.value)}
+              style={{ ...styles.select, width: 220 }}
+            >
+              <option value="all">Todos los planes</option>
+              {planOptions.map((plan) => (
+                <option key={plan} value={plan}>
+                  {plan}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ ...styles.fieldWrap, minWidth: 260, flex: "1 1 280px" }}>
+            <div style={styles.label}>Buscar por nombre o slug</div>
+            <input
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={{ ...styles.input, width: "100%" }}
+              placeholder="Ej: tienda24x7 o via_rapida_store"
+            />
+          </div>
+
+          <button
+            onClick={() => {
+              setStatusFilter("all");
+              setPlanFilter("all");
+              setSearchTerm("");
+            }}
+            style={styles.buttonSecondary}
+          >
+            Limpiar filtros
+          </button>
         </div>
 
         <div style={styles.tableWrap}>
@@ -726,7 +821,7 @@ export default function ClientsPage() {
             </thead>
 
             <tbody>
-              {rows.map((r) => {
+              {filteredRows.map((r) => {
                 const appUrl = buildAppUrl(String(getValue(r, "slug") ?? ""));
                 const dashboardUrl = buildDashboardUrl(
                   String(getValue(r, "slug") ?? ""),
@@ -938,6 +1033,14 @@ export default function ClientsPage() {
                   </tr>
                 );
               })}
+
+              {filteredRows.length === 0 && (
+                <tr>
+                  <td style={{ ...styles.td, textAlign: "center", color: "#6b7280", padding: 24 }} colSpan={13}>
+                    No hay clientes que coincidan con los filtros aplicados.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
