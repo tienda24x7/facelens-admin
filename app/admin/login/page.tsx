@@ -1,14 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent, type ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 
 export default function AdminLogin() {
   const [password, setPassword] = useState("");
-  const [err, setErr] = useState(null);
+  const [err, setErr] = useState<string | null>(null);
   const router = useRouter();
 
-  async function onSubmit(e) {
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setErr(null);
 
@@ -18,14 +18,29 @@ export default function AdminLogin() {
       body: JSON.stringify({ password }),
     });
 
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) return setErr(j?.error || "Login failed");
+    const j = await r.json().catch(() => ({} as { error?: string }));
+    if (!r.ok) {
+      setErr(j?.error || "Login failed");
+      return;
+    }
 
     router.push("/admin/clients");
   }
 
+  function onPasswordChange(e: ChangeEvent<HTMLInputElement>) {
+    setPassword(e.target.value);
+  }
+
   return (
-    <div style={{ maxWidth: 420, margin: "80px auto", padding: 20, border: "1px solid #eee", borderRadius: 12 }}>
+    <div
+      style={{
+        maxWidth: 420,
+        margin: "80px auto",
+        padding: 20,
+        border: "1px solid #eee",
+        borderRadius: 12,
+      }}
+    >
       <h1 style={{ marginBottom: 10 }}>FaceLens Admin</h1>
       <p style={{ marginTop: 0, color: "#666" }}>Acceso interno</p>
 
@@ -34,11 +49,25 @@ export default function AdminLogin() {
           type="password"
           placeholder="Password"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          style={{ width: "100%", padding: 12, borderRadius: 10, border: "1px solid #ddd" }}
+          onChange={onPasswordChange}
+          style={{
+            width: "100%",
+            padding: 12,
+            borderRadius: 10,
+            border: "1px solid #ddd",
+          }}
         />
         {err && <div style={{ marginTop: 10, color: "crimson" }}>{err}</div>}
-        <button style={{ marginTop: 12, width: "100%", padding: 12, borderRadius: 10, border: "1px solid #ddd" }}>
+        <button
+          type="submit"
+          style={{
+            marginTop: 12,
+            width: "100%",
+            padding: 12,
+            borderRadius: 10,
+            border: "1px solid #ddd",
+          }}
+        >
           Entrar
         </button>
       </form>
