@@ -344,6 +344,22 @@ export default function ClientsPage() {
     }
   }
 
+  function downloadCsv() {
+    try {
+      const params = new URLSearchParams({
+        status: statusFilter,
+        plan: planFilter,
+        comercial: comercialFilter,
+        search: searchTerm,
+      });
+
+      const url = `/api/admin/clients/export?${params.toString()}`;
+      window.open(url, "_blank");
+    } catch (e: any) {
+      setErr(e?.message || "No se pudo exportar el CSV");
+    }
+  }
+
   async function loadPlans() {
     try {
       const r = await fetch("/api/admin/plans", { cache: "no-store" });
@@ -754,6 +770,10 @@ export default function ClientsPage() {
           <div style={styles.row}>
             <button onClick={load} style={styles.buttonSecondary}>
               {loading ? "Cargando..." : "Recargar"}
+            </button>
+
+            <button onClick={downloadCsv} style={styles.buttonSecondary}>
+              Exportar CSV
             </button>
 
             <div style={styles.muted}>Total: {rows.length}</div>
