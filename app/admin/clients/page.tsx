@@ -10,6 +10,7 @@ type ClientRow = {
   color_primario?: string;
   olor_secundario?: string;
   activo?: boolean;
+  archived?: boolean;
   plan?: string;
   comercial?: string | null;
   whatsapp?: string | null;
@@ -170,6 +171,16 @@ const styles = {
     color: "#374151",
   } as React.CSSProperties,
 
+  buttonDanger: {
+    padding: "7px 12px",
+    borderRadius: 12,
+    cursor: "pointer",
+    fontWeight: 600,
+    border: "1px solid #dc2626",
+    background: "#ef4444",
+    color: "#fff",
+  } as React.CSSProperties,
+
   infoOk: {
     color: "#065f46",
     marginBottom: 10,
@@ -239,6 +250,7 @@ export default function ClientsPage() {
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [archivingId, setArchivingId] = useState<string | null>(null);
 
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [logoFileById, setLogoFileById] = useState<Record<string, File | null>>({});
@@ -427,6 +439,56 @@ export default function ClientsPage() {
       setErr(e?.message || "Error");
     } finally {
       setSavingId(null);
+    }
+  }
+
+  async function archiveClient(row: ClientRow) {
+    const nombre = cleanStr(row.nombre || row.slug || row.id);
+    const slug = cleanStr(row.slug);
+
+    try {
+      setArchivingId(row.id);
+      setErr(null);
+      setInfo(null);
+
+      if (!slug) {
+        throw new Error("No se puede archivar un cliente sin slug.");
+      }
+
+      const confirmed = window.confirm(
+        `Vas a archivar a "${nombre}".\n\nEsta acción lo quitará del listado operativo y lo dejará inactivo.\n\n¿Querés continuar?`
+      );
+
+      if (!confirmed) return;
+
+      const typed = window.prompt(
+        `Segunda validación:\n\nEscribí exactamente el slug del cliente para confirmar el archivado.\n\nSlug esperado: ${slug}`
+      );
+
+      if (typed === null) return;
+
+      if (cleanStr(typed) !== slug) {
+        throw new Error("La confirmación no coincide con el slug del cliente.");
+      }
+
+      const r = await fetch(`/api/admin/clients/${row.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          archived: true,
+          activo: false,
+        }),
+      });
+
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j?.ok) throw new Error(j?.error || "No se pudo archivar el cliente.");
+
+      setInfo(`✅ Cliente archivado: ${nombre}`);
+      await load();
+    } catch (e: any) {
+      setErr(e?.message || "No se pudo archivar el cliente.");
+    } finally {
+      setArchivingId(null);
     }
   }
 
@@ -898,6 +960,9 @@ export default function ClientsPage() {
                   String(getValue(r, "metrics_token") ?? "")
                 );
 
+                const hasChanges = Object.keys(draft[r.id] || {}).length > 0;
+                const isBusy = savingId === r.id || archivingId === r.id;
+
                 return (
                   <tr key={r.id}>
                     <td style={{ ...styles.td, fontFamily: "monospace", whiteSpace: "nowrap" }}>{r.id}</td>
@@ -1095,18 +1160,32 @@ export default function ClientsPage() {
                     </td>
 
                     <td style={styles.td}>
-                      <button
-                        onClick={() => saveRow(r.id)}
-                        disabled={savingId === r.id || Object.keys(draft[r.id] || {}).length === 0}
-                        style={{
-                          ...styles.buttonSuccess,
-                          padding: "7px 12px",
-                          opacity: savingId === r.id ? 0.7 : 1,
-                          cursor: savingId === r.id ? "wait" : "pointer",
-                        }}
-                      >
-                        {savingId === r.id ? "Guardando..." : "Guardar"}
-                      </button>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        <button
+                          onClick={() => saveRow(r.id)}
+                          disabled={isBusy || !hasChanges}
+                          style={{
+                            ...styles.buttonSuccess,
+                            padding: "7px 12px",
+                            opacity: isBusy ? 0.7 : 1,
+                            cursor: isBusy ? "wait" : "pointer",
+                          }}
+                        >
+                          {savingId === r.id ? "Guardando..." : "Guardar"}
+                        </button>
+
+                        <button
+                          onClick={() => archiveClient(r)}
+                          disabled={isBusy}
+                          style={{
+                            ...styles.buttonDanger,
+                            opacity: isBusy ? 0.7 : 1,
+                            cursor: isBusy ? "wait" : "pointer",
+                          }}
+                        >
+                          {archivingId === r.id ? "Archivando..." : "Archivar"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );

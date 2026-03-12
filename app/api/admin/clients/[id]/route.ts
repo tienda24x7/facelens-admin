@@ -3,13 +3,12 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 
 const TABLE = "clientes facelens";
 
-// Campos permitidos (whitelist) para que no se guarde cualquier cosa
 const ALLOWED = new Set([
   "nombre",
   "slug",
   "logo_url",
   "color_primario",
-  "olor_secundario", // está así en tu DB/json
+  "olor_secundario",
   "activo",
   "plan",
   "comercial",
@@ -17,6 +16,7 @@ const ALLOWED = new Set([
   "catalog_slug",
   "catalog_scope",
   "default_url",
+  "archived",
 ]);
 
 function pickAllowed(obj: any) {

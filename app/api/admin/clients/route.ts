@@ -21,6 +21,7 @@ export async function GET() {
     const { data: clients, error: clientsError } = await db
       .from(TABLE)
       .select("*")
+      .or("archived.is.null,archived.eq.false")
       .order("nombre", { ascending: true });
 
     if (clientsError) {
@@ -50,7 +51,10 @@ export async function GET() {
       }
 
       tokenBySlug = new Map(
-        (tokens || []).map((t: any) => [String(t.slug).trim(), String(t.token || "").trim()])
+        (tokens || []).map((t: any) => [
+          String(t.slug).trim(),
+          String(t.token || "").trim(),
+        ])
       );
     }
 
@@ -98,6 +102,7 @@ export async function POST(req: Request) {
       .from(TABLE)
       .select("id")
       .eq("slug", slug)
+      .or("archived.is.null,archived.eq.false")
       .limit(1);
 
     if (e1) {
@@ -124,6 +129,7 @@ export async function POST(req: Request) {
       catalog_slug: cleanStr(body.catalog_slug),
       catalog_scope: cleanStr(body.catalog_scope),
       default_url: cleanStr(body.default_url),
+      archived: false,
     };
 
     const { data, error } = await db
