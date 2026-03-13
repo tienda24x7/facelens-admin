@@ -48,6 +48,11 @@ function cleanStr(v: any) {
   return String(v ?? "").trim();
 }
 
+function normalizeHexColor(value: any, fallback = "#111111") {
+  const s = String(value ?? "").trim();
+  return /^#[0-9a-fA-F]{6}$/.test(s) ? s : fallback;
+}
+
 function buildAppUrl(slug?: string) {
   const s = cleanStr(slug);
   if (!s) return "";
@@ -940,6 +945,7 @@ export default function ClientsPage() {
                   "catalog_slug",
                   "whatsapp",
                   "default_url",
+                  "branding",
                   "logo",
                   "activo",
                   "acciones",
@@ -962,6 +968,9 @@ export default function ClientsPage() {
 
                 const hasChanges = Object.keys(draft[r.id] || {}).length > 0;
                 const isBusy = savingId === r.id || archivingId === r.id;
+
+                const currentPrimary = normalizeHexColor(getValue(r, "color_primario"), "#111111");
+                const currentSecondary = normalizeHexColor(getValue(r, "olor_secundario"), "#0F0F0F");
 
                 return (
                   <tr key={r.id}>
@@ -1107,6 +1116,46 @@ export default function ClientsPage() {
                     </td>
 
                     <td style={styles.td}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 210 }}>
+                        <div style={{ ...styles.fieldWrap }}>
+                          <div style={styles.label}>Primario</div>
+                          <div style={{ ...styles.row, gap: 8 }}>
+                            <input
+                              type="color"
+                              value={currentPrimary}
+                              onChange={(e) => setField(r.id, "color_primario", e.target.value)}
+                              style={{ width: 42, height: 34, padding: 0, border: "1px solid #ddd", borderRadius: 8 }}
+                            />
+                            <input
+                              value={String(getValue(r, "color_primario") ?? currentPrimary)}
+                              onChange={(e) => setField(r.id, "color_primario", e.target.value)}
+                              style={{ ...styles.input, width: 120 }}
+                              placeholder="#111111"
+                            />
+                          </div>
+                        </div>
+
+                        <div style={{ ...styles.fieldWrap }}>
+                          <div style={styles.label}>Secundario</div>
+                          <div style={{ ...styles.row, gap: 8 }}>
+                            <input
+                              type="color"
+                              value={currentSecondary}
+                              onChange={(e) => setField(r.id, "olor_secundario", e.target.value)}
+                              style={{ width: 42, height: 34, padding: 0, border: "1px solid #ddd", borderRadius: 8 }}
+                            />
+                            <input
+                              value={String(getValue(r, "olor_secundario") ?? currentSecondary)}
+                              onChange={(e) => setField(r.id, "olor_secundario", e.target.value)}
+                              style={{ ...styles.input, width: 120 }}
+                              placeholder="#0F0F0F"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+
+                    <td style={styles.td}>
                       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                         <div style={{ ...styles.row, alignItems: "center" }}>
                           <input
@@ -1193,7 +1242,7 @@ export default function ClientsPage() {
 
               {filteredRows.length === 0 && (
                 <tr>
-                  <td style={{ ...styles.td, textAlign: "center", color: "#6b7280", padding: 24 }} colSpan={14}>
+                  <td style={{ ...styles.td, textAlign: "center", color: "#6b7280", padding: 24 }} colSpan={15}>
                     No hay clientes que coincidan con los filtros aplicados.
                   </td>
                 </tr>
