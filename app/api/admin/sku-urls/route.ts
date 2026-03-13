@@ -6,26 +6,31 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-type InputRow = {
+type SaveRow = {
   sku: string;
-  url: string;
+  url?: string;
+  is_active?: boolean;
 };
 
-type ResolvedRow = {
-  sku: string;
-  url: string;
-  lente_id: string;
+type PlanLimits = {
+  max_skus: number | null;
+  max_urls: number | null;
 };
 
-function normalizeSku(value: string) {
+function normalizeSku(value: any) {
   return String(value || "").trim().toUpperCase();
 }
 
-function normalizeUrl(value: string) {
+function normalizeUrl(value: any) {
   return String(value || "").trim();
 }
 
+function normalizeCatalog(value: any) {
+  return String(value || "").trim().toUpperCase();
+}
+
 function isValidUrl(value: string) {
+  if (!value) return true;
   try {
     const u = new URL(value);
     return ["http:", "https:"].includes(u.protocol);
@@ -34,14 +39,16 @@ function isValidUrl(value: string) {
   }
 }
 
-async function getPlanLimit(planCode: string | null | undefined) {
-  if (!planCode) return null;
+async function getPlanLimits(planCode: string | null | undefined): Promise<PlanLimits> {
+  if (!planCode) {
+    return { max_skus: null, max_urls: null };
+  }
 
   const normalized = String(planCode).trim().toUpperCase();
 
   const { data, error } = await supabase
     .from("facelens_plans")
-    .select("plan_code, max_urls")
+    .select("plan_code, max_skus, max_urls")
     .eq("plan_code", normalized)
     .maybeSingle();
 
@@ -49,11 +56,139 @@ async function getPlanLimit(planCode: string | null | undefined) {
     throw new Error(`Error leyendo facelens_plans: ${error.message}`);
   }
 
-  if (!data) return null;
+  if (!data) {
+    return { max_skus: null, max_urls: null };
+  }
 
-  return data.max_urls === null || data.max_urls === undefined
-    ? null
-    : Number(data.max_urls);
+  return {
+    max_skus:
+      data.max_skus === null || data.max_skus === undefined
+        ? null
+        : Number(data.max_skus),
+    max_urls:
+      data.max_urls === null || data.max_urls === undefined
+        ? null
+        : Number(data.max_urls),
+  };
+}
+
+async function getClientOrThrow(client_id: string) {
+  const { data, error } = await supabase
+    .from("clientes facelens")
+    .select("id, slug, nombre, plan, catalog_scope, catalog_slug")
+    .eq("id", client_id)
+    .single();
+
+  if (error || !data) {
+    throw new Error(`Cliente no encontrado: ${error?.message || client_id}`);
+  }
+
+  return data;
+}
+
+async function getAllowedUniverseForClient(client: any) {
+  const scope = normalizeCatalog(client.catalog_scope || "ALL");
+
+  const catalogFilter =
+    scope === "ALL" ? ["NICOLAS", "EZEQUIEL"] : [scope];
+
+  const { data: memberships, error: membershipsErr } = await supabase
+    .from("lentes_catalogos")
+    .select("lens_id, catalogo")
+    .in("catalogo", catalogFilter);
+
+  if (membershipsErr) {
+    throw new Error(`Error leyendo lentes_catalogos: ${membershipsErr.message}`);
+  }
+
+  const lensIds = Array.from(
+    new Set((memberships || []).map((r: any) => String(r.lens_id || "")).filter(Boolean))
+  );
+
+  if (!lensIds.length) return [];
+
+  const catalogsByLensId = new Map<string, Set<string>>();
+  for (const row of memberships || []) {
+    const lensId = String(row.lens_id || "");
+    const catalog = normalizeCatalog(row.catalogo);
+    if (!lensId || !catalog) continue;
+    if (!catalogsByLensId.has(lensId)) catalogsByLensId.set(lensId, new Set<string>());
+    catalogsByLensId.get(lensId)!.add(catalog);
+  }
+
+  const { data: lensRows, error: lensErr } = await supabase
+    .from("lentes")
+    .select("id, sku")
+    .in("id", lensIds);
+
+  if (lensErr) {
+    throw new Error(`Error leyendo lentes: ${lensErr.message}`);
+  }
+
+  const skuByLensId = new Map<string, string>();
+  const lensIdBySku = new Map<string, string>();
+
+  for (const row of lensRows || []) {
+    const lensId = String(row.id || "");
+    const sku = normalizeSku(row.sku);
+    if (!lensId || !sku) continue;
+    skuByLensId.set(lensId, sku);
+    lensIdBySku.set(sku, lensId);
+  }
+
+  const skus = Array.from(lensIdBySku.keys());
+  if (!skus.length) return [];
+
+  const { data: importRows, error: importErr } = await supabase
+    .from("import_lentes")
+    .select("sku, rb, nombre_modelo, categoria, proveedor, grupo, activo")
+    .in("sku", skus);
+
+  if (importErr) {
+    throw new Error(`Error leyendo import_lentes: ${importErr.message}`);
+  }
+
+  const importBySku = new Map<string, any>();
+  for (const row of importRows || []) {
+    const sku = normalizeSku(row.sku);
+    if (sku) importBySku.set(sku, row);
+  }
+
+  const out: Array<{
+    lens_id: string;
+    sku: string;
+    rb: string;
+    nombre: string;
+    categoria: string;
+    proveedor: string;
+    grupo: string;
+    activo_base: boolean;
+    catalogos: string[];
+  }> = [];
+
+  for (const lensId of lensIds) {
+    const sku = skuByLensId.get(lensId);
+    if (!sku) continue;
+
+    const imp = importBySku.get(sku);
+    if (!imp) continue;
+
+    out.push({
+      lens_id: lensId,
+      sku,
+      rb: String(imp.rb || "").trim(),
+      nombre: String(imp.nombre_modelo || "").trim(),
+      categoria: String(imp.categoria || "").trim(),
+      proveedor: String(imp.proveedor || "").trim(),
+      grupo: String(imp.grupo || "").trim(),
+      activo_base: !!imp.activo,
+      catalogos: Array.from(catalogsByLensId.get(lensId) || []).sort(),
+    });
+  }
+
+  out.sort((a, b) => a.sku.localeCompare(b.sku, "es"));
+
+  return out;
 }
 
 export async function GET(req: NextRequest) {
@@ -64,100 +199,101 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Falta client_id" }, { status: 400 });
     }
 
-    const { data: client, error: clientErr } = await supabase
-      .from("clientes facelens")
-      .select("id, slug, nombre, plan")
-      .eq("id", client_id)
-      .single();
+    const client = await getClientOrThrow(client_id);
+    const plan = await getPlanLimits(client.plan);
+    const universe = await getAllowedUniverseForClient(client);
 
-    if (clientErr || !client) {
-      return NextResponse.json(
-        { error: "Cliente no encontrado", detail: clientErr?.message },
-        { status: 404 }
-      );
-    }
-
-    const allowed_total = await getPlanLimit(client.plan);
-
-    const { data: allowedRows, error: allowedErr } = await supabase
-      .from("v_lentes_por_cliente")
-      .select("sku, rb, nombre_modelo, client_slug")
+    const { data: activeRows, error: activeErr } = await supabase
+      .from("facelens_sku_urls")
+      .select("sku, product_url, is_active")
       .eq("client_slug", client.slug);
 
-    if (allowedErr) {
+    if (activeErr) {
       return NextResponse.json(
-        { error: "Error leyendo catálogo permitido", detail: allowedErr.message },
+        { error: "Error leyendo facelens_sku_urls", detail: activeErr.message },
         { status: 500 }
       );
     }
 
-    const allowedSkus = Array.from(
-      new Set((allowedRows || []).map((r: any) => normalizeSku(r.sku)).filter(Boolean))
-    );
+    const activeBySku = new Map<
+      string,
+      { is_active: boolean; product_url: string }
+    >();
 
-    const { data: lensRows, error: lensErr } = await supabase
-      .from("lentes")
-      .select("id, sku")
-      .in("sku", allowedSkus);
-
-    if (lensErr) {
-      return NextResponse.json(
-        { error: "Error resolviendo lentes por SKU", detail: lensErr.message },
-        { status: 500 }
-      );
-    }
-
-    const lensIdBySku = new Map<string, string>();
-    for (const row of lensRows || []) {
+    for (const row of activeRows || []) {
       const sku = normalizeSku(row.sku);
-      if (sku && row.id) lensIdBySku.set(sku, String(row.id));
+      if (!sku) continue;
+      activeBySku.set(sku, {
+        is_active: !!row.is_active,
+        product_url: normalizeUrl(row.product_url),
+      });
     }
 
-    const { data: savedRows, error: savedErr } = await supabase
+    const { data: urlRows, error: urlErr } = await supabase
       .from("clientes_lentes_urls")
-      .select("id, cliente_id, lente_id, product_url")
-      .eq("cliente_id", client_id);
+      .select("cliente_id, lente_id, product_url")
+      .eq("cliente_id", client.id);
 
-    if (savedErr) {
+    if (urlErr) {
       return NextResponse.json(
-        { error: "Error leyendo URLs guardadas", detail: savedErr.message },
+        { error: "Error leyendo clientes_lentes_urls", detail: urlErr.message },
         { status: 500 }
       );
     }
 
-    const savedMapByLenteId = new Map<string, string>();
-    for (const row of savedRows || []) {
-      if (row?.lente_id) {
-        savedMapByLenteId.set(String(row.lente_id), row.product_url || "");
-      }
+    const urlByLensId = new Map<string, string>();
+    for (const row of urlRows || []) {
+      const lensId = String(row.lente_id || "");
+      if (!lensId) continue;
+      urlByLensId.set(lensId, normalizeUrl(row.product_url));
     }
 
-    const rows = (allowedRows || []).map((r: any) => {
-      const sku = normalizeSku(r.sku);
-      const lente_id = lensIdBySku.get(sku) || "";
+    const rows = universe.map((row) => {
+      const active = activeBySku.get(row.sku);
+      const url =
+        active?.product_url ||
+        urlByLensId.get(row.lens_id) ||
+        "";
+
       return {
-        sku,
-        rb: String(r.rb || "").trim(),
-        nombre: r.nombre_modelo || "",
-        url: lente_id ? savedMapByLenteId.get(lente_id) || "" : "",
+        sku: row.sku,
+        rb: row.rb,
+        nombre: row.nombre,
+        categoria: row.categoria,
+        proveedor: row.proveedor,
+        grupo: row.grupo,
+        catalogos: row.catalogos,
+        lens_id: row.lens_id,
+        is_active: !!active?.is_active,
+        url,
+        try_on_url: `https://facelens-live.vercel.app/?slug=${encodeURIComponent(
+          String(client.slug || "")
+        )}&sku=${encodeURIComponent(row.sku)}`,
       };
     });
 
-    const filled = (savedRows || []).length;
-    const remaining =
-      allowed_total === null ? null : Math.max(allowed_total - filled, 0);
+    const activeCount = rows.filter((r) => r.is_active).length;
+    const urlCount = rows.filter((r) => normalizeUrl(r.url)).length;
 
     return NextResponse.json({
+      ok: true,
       client: {
         id: client.id,
         slug: client.slug,
         nombre: client.nombre,
         plan: client.plan,
+        catalog_scope: client.catalog_scope,
+        catalog_slug: client.catalog_slug,
       },
       plan: {
-        allowed_total,
-        filled,
-        remaining,
+        max_skus: plan.max_skus,
+        max_urls: plan.max_urls,
+        active_count: activeCount,
+        active_remaining:
+          plan.max_skus === null ? null : Math.max(plan.max_skus - activeCount, 0),
+        url_count: urlCount,
+        url_remaining:
+          plan.max_urls === null ? null : Math.max(plan.max_urls - urlCount, 0),
       },
       rows,
     });
@@ -190,27 +326,36 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const inputRows: InputRow[] = rawRows.map((r: any) => ({
+    const client = await getClientOrThrow(client_id);
+    const plan = await getPlanLimits(client.plan);
+    const universe = await getAllowedUniverseForClient(client);
+
+    const universeBySku = new Map<string, any>();
+    for (const row of universe) {
+      universeBySku.set(normalizeSku(row.sku), row);
+    }
+
+    const inputRows: SaveRow[] = rawRows.map((r: any) => ({
       sku: normalizeSku(r?.sku),
       url: normalizeUrl(r?.url),
+      is_active: !!r?.is_active,
     }));
 
+    const deduped = new Map<string, SaveRow>();
     const invalid: Array<{ sku: string; url: string; reason: string }> = [];
-
-    const dedupedMap = new Map<string, InputRow>();
     let duplicate_count = 0;
 
     for (const row of inputRows) {
-      if (!row.sku || !row.url) {
+      if (!row.sku) {
         invalid.push({
-          sku: row.sku,
-          url: row.url,
-          reason: "missing_fields",
+          sku: "",
+          url: normalizeUrl(row.url),
+          reason: "missing_sku",
         });
         continue;
       }
 
-      if (!isValidUrl(row.url)) {
+      if (row.url && !isValidUrl(row.url)) {
         invalid.push({
           sku: row.sku,
           url: row.url,
@@ -219,205 +364,110 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      if (dedupedMap.has(row.sku)) duplicate_count++;
-      dedupedMap.set(row.sku, row);
+      if (deduped.has(row.sku)) duplicate_count++;
+      deduped.set(row.sku, row);
     }
 
-    const rows = Array.from(dedupedMap.values());
+    const rows = Array.from(deduped.values());
 
-    const { data: client, error: clientErr } = await supabase
-      .from("clientes facelens")
-      .select("id, slug, nombre, plan")
-      .eq("id", client_id)
-      .single();
-
-    if (clientErr || !client) {
-      return NextResponse.json(
-        { error: "Cliente no encontrado", detail: clientErr?.message },
-        { status: 404 }
-      );
-    }
-
-    const allowed_total = await getPlanLimit(client.plan);
-
-    const { data: allowedRows, error: allowedErr } = await supabase
-      .from("v_lentes_por_cliente")
-      .select("sku, nombre_modelo, client_slug")
-      .eq("client_slug", client.slug);
-
-    if (allowedErr) {
-      return NextResponse.json(
-        { error: "Error leyendo catálogo permitido", detail: allowedErr.message },
-        { status: 500 }
-      );
-    }
-
-    const allowedSkuMap = new Map<string, any>();
-    for (const row of allowedRows || []) {
-      const sku = normalizeSku(row.sku);
-      if (sku) allowedSkuMap.set(sku, row);
-    }
-
-    const allowedSkus = Array.from(allowedSkuMap.keys());
-
-    const { data: lensRows, error: lensErr } = await supabase
-      .from("lentes")
-      .select("id, sku")
-      .in("sku", allowedSkus);
-
-    if (lensErr) {
-      return NextResponse.json(
-        { error: "Error resolviendo lentes por SKU", detail: lensErr.message },
-        { status: 500 }
-      );
-    }
-
-    const lensIdBySku = new Map<string, string>();
-    for (const row of lensRows || []) {
-      const sku = normalizeSku(row.sku);
-      if (sku && row.id) lensIdBySku.set(sku, String(row.id));
-    }
-
-    const validCatalogRows: ResolvedRow[] = [];
-    const ignored_not_allowed: Array<{ sku: string; url: string; reason: string }> = [];
+    const notAllowed: Array<{ sku: string; reason: string }> = [];
+    const allowedRows: SaveRow[] = [];
 
     for (const row of rows) {
-      const allowed = allowedSkuMap.get(row.sku);
-
-      if (!allowed) {
-        ignored_not_allowed.push({
+      if (!universeBySku.has(row.sku)) {
+        notAllowed.push({
           sku: row.sku,
-          url: row.url,
           reason: "sku_not_allowed_for_client",
         });
         continue;
       }
-
-      const lente_id = lensIdBySku.get(row.sku);
-
-      if (!lente_id) {
-        invalid.push({
-          sku: row.sku,
-          url: row.url,
-          reason: "sku_not_found_in_lentes",
-        });
-        continue;
-      }
-
-      validCatalogRows.push({
-        sku: row.sku,
-        url: row.url,
-        lente_id,
-      });
+      allowedRows.push(row);
     }
 
-    const { data: existingRows, error: existingErr } = await supabase
-      .from("clientes_lentes_urls")
-      .select("id, cliente_id, lente_id, product_url")
-      .eq("cliente_id", client_id);
+    const activeRequestedCount = allowedRows.filter((r) => r.is_active).length;
+    const urlRequestedCount = allowedRows.filter((r) => normalizeUrl(r.url)).length;
 
-    if (existingErr) {
+    if (plan.max_skus !== null && activeRequestedCount > plan.max_skus) {
       return NextResponse.json(
-        { error: "Error leyendo URLs existentes", detail: existingErr.message },
-        { status: 500 }
+        {
+          error: `El plan permite máximo ${plan.max_skus} SKUs activos y estás intentando guardar ${activeRequestedCount}.`,
+        },
+        { status: 400 }
       );
     }
 
-    const existingByLenteId = new Map<string, any>();
-    for (const row of existingRows || []) {
-      if (row?.lente_id) {
-        existingByLenteId.set(String(row.lente_id), row);
-      }
+    if (plan.max_urls !== null && urlRequestedCount > plan.max_urls) {
+      return NextResponse.json(
+        {
+          error: `El plan permite máximo ${plan.max_urls} URLs de producto y estás intentando guardar ${urlRequestedCount}.`,
+        },
+        { status: 400 }
+      );
     }
 
-    const currentFilled = (existingRows || []).length;
-
-    const candidatesToUpdate: ResolvedRow[] = [];
-    const candidatesToInsert: ResolvedRow[] = [];
-
-    for (const row of validCatalogRows) {
-      if (existingByLenteId.has(row.lente_id)) candidatesToUpdate.push(row);
-      else candidatesToInsert.push(row);
-    }
-
-    let insertSlotsRemaining =
-      allowed_total === null ? Infinity : Math.max(allowed_total - currentFilled, 0);
-
-    const insertsAllowed: ResolvedRow[] = [];
-    const ignored_by_limit: Array<{ sku: string; url: string; reason: string }> = [];
-
-    for (const row of candidatesToInsert) {
-      if (insertSlotsRemaining > 0) {
-        insertsAllowed.push(row);
-        insertSlotsRemaining--;
-      } else {
-        ignored_by_limit.push({
-          sku: row.sku,
-          url: row.url,
-          reason: "plan_limit_reached",
-        });
-      }
-    }
-
-    const updated: string[] = [];
-
-    for (const row of candidatesToUpdate) {
-      const existing = existingByLenteId.get(row.lente_id);
-
-      if (normalizeUrl(existing.product_url) === row.url) {
-        updated.push(row.sku);
-        continue;
-      }
-
-      const { error: updateErr } = await supabase
-        .from("clientes_lentes_urls")
-        .update({ product_url: row.url })
-        .eq("id", existing.id);
-
-      if (updateErr) {
-        invalid.push({
-          sku: row.sku,
-          url: row.url,
-          reason: `update_error:${updateErr.message}`,
-        });
-      } else {
-        updated.push(row.sku);
-      }
-    }
-
-    const rowsToInsert = insertsAllowed.map((row) => ({
-      cliente_id: client_id,
-      lente_id: row.lente_id,
-      product_url: row.url,
+    const upsertRows = allowedRows.map((row) => ({
+      client_slug: String(client.slug || "").trim(),
+      sku: row.sku,
+      product_url: normalizeUrl(row.url),
+      is_active: !!row.is_active,
     }));
 
-    let inserted: string[] = [];
+    if (upsertRows.length > 0) {
+      const { error: upsertErr } = await supabase
+        .from("facelens_sku_urls")
+        .upsert(upsertRows, { onConflict: "client_slug,sku" });
 
-    if (rowsToInsert.length > 0) {
-      const { data: insertedRows, error: insertErr } = await supabase
-        .from("clientes_lentes_urls")
-        .insert(rowsToInsert)
-        .select("lente_id");
-
-      if (insertErr) {
+      if (upsertErr) {
         return NextResponse.json(
-          { error: "Error insertando URLs", detail: insertErr.message },
+          { error: "Error guardando facelens_sku_urls", detail: upsertErr.message },
           { status: 500 }
         );
       }
-
-      const insertedLensIds = new Set(
-        (insertedRows || []).map((r: any) => String(r.lente_id))
-      );
-
-      inserted = insertsAllowed
-        .filter((row) => insertedLensIds.has(String(row.lente_id)))
-        .map((row) => row.sku);
     }
 
-    const finalFilled = currentFilled + inserted.length;
-    const remaining =
-      allowed_total === null ? null : Math.max(allowed_total - finalFilled, 0);
+    const toDeleteUrls = allowedRows
+      .filter((r) => !normalizeUrl(r.url))
+      .map((r) => universeBySku.get(r.sku)?.lens_id)
+      .filter(Boolean);
+
+    if (toDeleteUrls.length > 0) {
+      const { error: deleteErr } = await supabase
+        .from("clientes_lentes_urls")
+        .delete()
+        .eq("cliente_id", client.id)
+        .in("lente_id", toDeleteUrls);
+
+      if (deleteErr) {
+        return NextResponse.json(
+          { error: "Error borrando URLs vacías", detail: deleteErr.message },
+          { status: 500 }
+        );
+      }
+    }
+
+    const urlUpserts = allowedRows
+      .filter((r) => normalizeUrl(r.url))
+      .map((r) => {
+        const universeRow = universeBySku.get(r.sku);
+        return {
+          cliente_id: client.id,
+          lente_id: universeRow.lens_id,
+          product_url: normalizeUrl(r.url),
+        };
+      });
+
+    if (urlUpserts.length > 0) {
+      const { error: urlUpsertErr } = await supabase
+        .from("clientes_lentes_urls")
+        .upsert(urlUpserts, { onConflict: "cliente_id,lente_id" });
+
+      if (urlUpsertErr) {
+        return NextResponse.json(
+          { error: "Error guardando clientes_lentes_urls", detail: urlUpsertErr.message },
+          { status: 500 }
+        );
+      }
+    }
 
     return NextResponse.json({
       ok: true,
@@ -426,24 +476,14 @@ export async function POST(req: NextRequest) {
         deduped_rows: rows.length,
         duplicate_count,
         invalid_count: invalid.length,
-        ignored_not_allowed_count: ignored_not_allowed.length,
-        ignored_by_limit_count: ignored_by_limit.length,
-        updated_count: updated.length,
-        inserted_count: inserted.length,
-        applied_count: updated.length + inserted.length,
-      },
-      plan: {
-        allowed_total,
-        filled_before: currentFilled,
-        filled_after: finalFilled,
-        remaining,
+        not_allowed_count: notAllowed.length,
+        saved_count: allowedRows.length,
+        active_count: activeRequestedCount,
+        url_count: urlRequestedCount,
       },
       details: {
-        updated,
-        inserted,
         invalid,
-        ignored_not_allowed,
-        ignored_by_limit,
+        not_allowed: notAllowed,
       },
     });
   } catch (error: any) {

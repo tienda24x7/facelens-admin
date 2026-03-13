@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Client = {
   id: string;
@@ -11,42 +11,33 @@ type Client = {
   catalog_slug?: string | null;
 };
 
-type ExistingRow = {
-  sku: string;
-  rb?: string;
-  nombre?: string;
-  url: string;
-};
-
-type ParsedRow = {
-  sku: string;
-  url: string;
-};
-
 type PlanInfo = {
-  allowed_total: number | null;
-  filled: number;
-  remaining: number | null;
+  max_skus: number | null;
+  max_urls: number | null;
+  active_count: number;
+  active_remaining: number | null;
+  url_count: number;
+  url_remaining: number | null;
 };
 
-type ParseStats = {
-  totalLines: number;
-  validRows: number;
-  uniqueRows: number;
-  duplicateRows: number;
-  invalidRows: number;
+type SkuRow = {
+  sku: string;
+  rb: string;
+  nombre: string;
+  categoria: string;
+  proveedor: string;
+  grupo: string;
+  catalogos: string[];
+  lens_id: string;
+  is_active: boolean;
+  url: string;
+  try_on_url: string;
 };
 
-type LimitPreview = {
-  updateCount: number;
-  newCount: number;
-  wouldFitCount: number;
-  wouldExceedCount: number;
-  exceedingSkus: string[];
+type DraftRow = {
+  is_active?: boolean;
+  url?: string;
 };
-
-// ✅ CAMBIAR si querés apuntar a otro dominio/base del Live
-const FACELENS_LIVE_BASE_URL = "https://facelens-live.vercel.app";
 
 function normSku(v: any) {
   return String(v ?? "").trim().toUpperCase();
@@ -56,109 +47,8 @@ function normUrl(v: any) {
   return String(v ?? "").trim();
 }
 
-function isHeaderRow(firstCell: string, secondCell: string) {
-  const a = normSku(firstCell);
-  const b = normSku(secondCell);
-
-  const firstIsHeader = a === "SKU";
-  const secondIsHeader =
-    b === "URL" ||
-    b === "PRODUCT_URL" ||
-    b === "PRODUCTURL" ||
-    b === "LINK" ||
-    b === "ENLACE";
-
-  return firstIsHeader && secondIsHeader;
-}
-
-function splitLine(line: string) {
-  return line.split(/\t|,|;/).map((p) => p.trim());
-}
-
-function parseBulk(text: string): ParsedRow[] {
-  const lines = String(text || "")
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
-
-  const out: ParsedRow[] = [];
-
-  for (const line of lines) {
-    const parts = splitLine(line);
-    if (parts.length < 2) continue;
-
-    if (isHeaderRow(parts[0], parts[1])) continue;
-
-    const sku = normSku(parts[0]);
-    const url = normUrl(parts.slice(1).join(","));
-
-    if (!sku || !url) continue;
-    out.push({ sku, url });
-  }
-
-  const map = new Map<string, string>();
-  for (const r of out) map.set(r.sku, r.url);
-
-  return Array.from(map.entries()).map(([sku, url]) => ({ sku, url }));
-}
-
-function getParseStats(text: string): ParseStats {
-  const lines = String(text || "")
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
-
-  let totalLines = 0;
-  let validRows = 0;
-  let invalidRows = 0;
-  const seen = new Set<string>();
-  let duplicateRows = 0;
-
-  for (const line of lines) {
-    const parts = splitLine(line);
-    if (parts.length < 2) {
-      invalidRows++;
-      totalLines++;
-      continue;
-    }
-
-    if (isHeaderRow(parts[0], parts[1])) {
-      continue;
-    }
-
-    const sku = normSku(parts[0]);
-    const url = normUrl(parts.slice(1).join(","));
-
-    totalLines++;
-
-    if (!sku || !url) {
-      invalidRows++;
-      continue;
-    }
-
-    validRows++;
-
-    if (seen.has(sku)) duplicateRows++;
-    seen.add(sku);
-  }
-
-  return {
-    totalLines,
-    validRows,
-    uniqueRows: seen.size,
-    duplicateRows,
-    invalidRows,
-  };
-}
-
-function buildTryOnUrl(baseUrl: string, clientSlug?: string, sku?: string) {
-  const cleanBase = String(baseUrl || "").trim().replace(/\/+$/, "");
-  const slug = String(clientSlug || "").trim();
-  const cleanSku = normSku(sku);
-
-  if (!cleanBase || !slug || !cleanSku) return "";
-
-  return `${cleanBase}/?slug=${encodeURIComponent(slug)}&sku=${encodeURIComponent(cleanSku)}`;
+function isPrimePlan(plan?: string | null) {
+  return String(plan || "").trim().toUpperCase().includes("PRIME");
 }
 
 const styles = {
@@ -209,6 +99,17 @@ const styles = {
     outline: "none",
   } as React.CSSProperties,
 
+  inputSmall: {
+    width: "100%",
+    minWidth: 220,
+    padding: 9,
+    borderRadius: 10,
+    border: "1px solid #d1d5db",
+    background: "#fff",
+    color: "#111827",
+    outline: "none",
+  } as React.CSSProperties,
+
   select: {
     padding: 10,
     borderRadius: 12,
@@ -216,17 +117,6 @@ const styles = {
     minWidth: 340,
     background: "#fff",
     color: "#111827",
-  } as React.CSSProperties,
-
-  textarea: {
-    width: "100%",
-    height: 170,
-    padding: 12,
-    borderRadius: 14,
-    border: "1px solid #d1d5db",
-    background: "#fff",
-    color: "#111827",
-    resize: "vertical" as const,
   } as React.CSSProperties,
 
   buttonPrimary: {
@@ -264,7 +154,7 @@ const styles = {
     border: "1px solid #e5e7eb",
     borderRadius: 14,
     background: "#fbfcfe",
-    minWidth: 130,
+    minWidth: 150,
   } as React.CSSProperties,
 
   metricLabel: {
@@ -331,113 +221,86 @@ const styles = {
 
   urlBox: {
     display: "inline-block",
-    maxWidth: 360,
+    maxWidth: 320,
     whiteSpace: "nowrap" as const,
     overflow: "hidden",
     textOverflow: "ellipsis",
     fontSize: 12,
     color: "#374151",
   } as React.CSSProperties,
+
+  chip: {
+    display: "inline-block",
+    padding: "4px 8px",
+    borderRadius: 999,
+    background: "#eef2ff",
+    color: "#3730a3",
+    fontSize: 12,
+    fontWeight: 600,
+    marginRight: 6,
+    marginBottom: 6,
+  } as React.CSSProperties,
+
+  badgeWarn: {
+    display: "inline-block",
+    padding: "4px 8px",
+    borderRadius: 999,
+    background: "#fff7ed",
+    color: "#9a3412",
+    fontSize: 12,
+    fontWeight: 700,
+  } as React.CSSProperties,
 };
 
 export default function SkuUrlsPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [clientId, setClientId] = useState<string>("");
-  const [existing, setExisting] = useState<ExistingRow[]>([]);
-  const [paste, setPaste] = useState<string>("");
-  const [search, setSearch] = useState<string>("");
+
+  const [rows, setRows] = useState<SkuRow[]>([]);
+  const [draft, setDraft] = useState<Record<string, DraftRow>>({});
 
   const [planInfo, setPlanInfo] = useState<PlanInfo | null>(null);
-  const [selectedClient, setSelectedClient] = useState<any>(null);
+  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
 
   const [loadingClients, setLoadingClients] = useState(false);
-  const [loadingExisting, setLoadingExisting] = useState(false);
+  const [loadingRows, setLoadingRows] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [importing, setImporting] = useState(false);
-  const [readingFile, setReadingFile] = useState(false);
 
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [selectedFileName, setSelectedFileName] = useState<string>("");
 
-  const [copiedSku, setCopiedSku] = useState<string>("");
+  const [search, setSearch] = useState("");
+  const [filterActive, setFilterActive] = useState<"all" | "active" | "inactive">("all");
+  const [filterCategory, setFilterCategory] = useState("all");
+  const [filterCatalog, setFilterCatalog] = useState("all");
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [copiedKey, setCopiedKey] = useState("");
 
-  const parsed = useMemo(() => parseBulk(paste), [paste]);
-  const parseStats = useMemo(() => getParseStats(paste), [paste]);
+  function getValue(row: SkuRow, key: keyof SkuRow | "url" | "is_active") {
+    const d = draft[row.sku];
+    if (d && key in d) return (d as any)[key];
+    return (row as any)[key];
+  }
 
-  const filteredExisting = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return existing;
+  function setField(sku: string, key: keyof DraftRow, value: any) {
+    setDraft((prev) => ({
+      ...prev,
+      [sku]: {
+        ...(prev[sku] || {}),
+        [key]: value,
+      },
+    }));
+  }
 
-    return existing.filter((row) => {
-      const sku = String(row.sku || "").toLowerCase();
-      const rb = String(row.rb || "").toLowerCase();
-      const nombre = String(row.nombre || "").toLowerCase();
-      const url = String(row.url || "").toLowerCase();
-      return sku.includes(q) || rb.includes(q) || nombre.includes(q) || url.includes(q);
-    });
-  }, [existing, search]);
-
-  const limitPreview = useMemo<LimitPreview | null>(() => {
-    if (!parsed.length) return null;
-
-    const existingSkuSet = new Set(existing.map((row) => normSku(row.sku)));
-
-    let updateCount = 0;
-    const newSkus: string[] = [];
-
-    for (const row of parsed) {
-      if (existingSkuSet.has(normSku(row.sku))) {
-        updateCount++;
-      } else {
-        newSkus.push(normSku(row.sku));
-      }
-    }
-
-    const remaining = planInfo?.remaining;
-
-    if (remaining === null || remaining === undefined) {
-      return {
-        updateCount,
-        newCount: newSkus.length,
-        wouldFitCount: newSkus.length,
-        wouldExceedCount: 0,
-        exceedingSkus: [],
-      };
-    }
-
-    const wouldFitCount = Math.max(Math.min(newSkus.length, remaining), 0);
-    const exceedingSkus = newSkus.slice(wouldFitCount);
-
-    return {
-      updateCount,
-      newCount: newSkus.length,
-      wouldFitCount,
-      wouldExceedCount: exceedingSkus.length,
-      exceedingSkus,
-    };
-  }, [parsed, existing, planInfo]);
-
-  async function copyTryOnUrl(row: ExistingRow) {
+  async function copyText(value: string, key: string, okMsg: string) {
     try {
-      const tryOnUrl = buildTryOnUrl(
-        FACELENS_LIVE_BASE_URL,
-        selectedClient?.slug,
-        row.sku
-      );
-
-      if (!tryOnUrl) {
-        throw new Error("No se pudo generar la URL del probador.");
-      }
-
-      await navigator.clipboard.writeText(tryOnUrl);
-      setCopiedSku(row.sku);
-      setMsg(`URL del probador copiada para SKU ${row.sku}`);
-      setTimeout(() => setCopiedSku(""), 1800);
+      if (!value) throw new Error("No hay valor para copiar.");
+      await navigator.clipboard.writeText(value);
+      setCopiedKey(key);
+      setMsg(okMsg);
+      setTimeout(() => setCopiedKey(""), 1800);
     } catch (e: any) {
-      setErr(e?.message || "No se pudo copiar la URL del probador");
+      setErr(e?.message || "No se pudo copiar");
     }
   }
 
@@ -450,10 +313,9 @@ export default function SkuUrlsPage() {
       const r = await fetch("/api/admin/clients", { cache: "no-store" });
       const j = await r.json().catch(() => ({}));
 
-      const list: Client[] = j?.data || j?.clients || [];
-
       if (!r.ok) throw new Error(j?.error || "Error cargando clientes");
 
+      const list: Client[] = j?.data || [];
       setClients(list);
 
       if (!clientId && list.length) {
@@ -466,15 +328,16 @@ export default function SkuUrlsPage() {
     }
   }
 
-  async function loadExisting(id: string) {
+  async function loadRows(id: string) {
     if (!id) {
-      setExisting([]);
+      setRows([]);
       setPlanInfo(null);
       setSelectedClient(null);
+      setDraft({});
       return;
     }
 
-    setLoadingExisting(true);
+    setLoadingRows(true);
     setErr(null);
     setMsg(null);
 
@@ -484,34 +347,116 @@ export default function SkuUrlsPage() {
       });
 
       const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.error || "Error cargando SKUs");
 
-      if (!r.ok) throw new Error(j?.error || "Error cargando URLs");
-
-      setExisting(j?.rows || []);
+      setRows(j?.rows || []);
       setPlanInfo(j?.plan || null);
       setSelectedClient(j?.client || null);
+      setDraft({});
     } catch (e: any) {
-      setErr(e?.message || "Error cargando URLs");
+      setErr(e?.message || "Error cargando SKUs");
     } finally {
-      setLoadingExisting(false);
+      setLoadingRows(false);
     }
   }
 
-  async function saveGrid() {
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    rows.forEach((r) => {
+      const c = String(r.categoria || "").trim();
+      if (c) set.add(c);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "es"));
+  }, [rows]);
+
+  const catalogs = useMemo(() => {
+    const set = new Set<string>();
+    rows.forEach((r) => {
+      (r.catalogos || []).forEach((c) => {
+        const v = String(c || "").trim();
+        if (v) set.add(v);
+      });
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "es"));
+  }, [rows]);
+
+  const filteredRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+
+    return rows.filter((row) => {
+      const isActive = !!getValue(row, "is_active");
+      const url = String(getValue(row, "url") || "").toLowerCase();
+      const sku = String(row.sku || "").toLowerCase();
+      const rb = String(row.rb || "").toLowerCase();
+      const nombre = String(row.nombre || "").toLowerCase();
+      const categoria = String(row.categoria || "").toLowerCase();
+      const cats = (row.catalogos || []).join(" ").toLowerCase();
+
+      const matchesSearch =
+        !q ||
+        sku.includes(q) ||
+        rb.includes(q) ||
+        nombre.includes(q) ||
+        categoria.includes(q) ||
+        cats.includes(q) ||
+        url.includes(q);
+
+      const matchesActive =
+        filterActive === "all" ||
+        (filterActive === "active" && isActive) ||
+        (filterActive === "inactive" && !isActive);
+
+      const matchesCategory =
+        filterCategory === "all" || String(row.categoria || "") === filterCategory;
+
+      const matchesCatalog =
+        filterCatalog === "all" || (row.catalogos || []).includes(filterCatalog);
+
+      return matchesSearch && matchesActive && matchesCategory && matchesCatalog;
+    });
+  }, [rows, draft, search, filterActive, filterCategory, filterCatalog]);
+
+  const rowsWithDraft = useMemo(() => {
+    return rows.map((row) => ({
+      ...row,
+      is_active: !!getValue(row, "is_active"),
+      url: normUrl(getValue(row, "url")),
+    }));
+  }, [rows, draft]);
+
+  const activeCountDraft = useMemo(() => {
+    return rowsWithDraft.filter((r) => r.is_active).length;
+  }, [rowsWithDraft]);
+
+  const urlCountDraft = useMemo(() => {
+    return rowsWithDraft.filter((r) => normUrl(r.url)).length;
+  }, [rowsWithDraft]);
+
+  const hasChanges = useMemo(() => {
+    return Object.keys(draft).some((sku) => Object.keys(draft[sku] || {}).length > 0);
+  }, [draft]);
+
+  async function saveAll() {
     setSaving(true);
     setErr(null);
     setMsg(null);
 
     try {
       if (!clientId) throw new Error("Elegí un cliente primero.");
-      if (parsed.length === 0) {
-        throw new Error("No detecté líneas válidas. Formato: SKU,URL o SKU<TAB>URL.");
-      }
+
+      const payloadRows = rows.map((row) => ({
+        sku: row.sku,
+        is_active: !!getValue(row, "is_active"),
+        url: normUrl(getValue(row, "url")),
+      }));
 
       const r = await fetch("/api/admin/sku-urls", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ client_id: clientId, rows: parsed }),
+        body: JSON.stringify({
+          client_id: clientId,
+          rows: payloadRows,
+        }),
       });
 
       const j = await r.json().catch(() => ({}));
@@ -519,13 +464,10 @@ export default function SkuUrlsPage() {
       if (!r.ok) throw new Error(j?.error || "Error guardando");
 
       setMsg(
-        `Guardar grilla OK • Aplicadas: ${j?.summary?.applied_count ?? 0} • Insertadas: ${j?.summary?.inserted_count ?? 0} • Actualizadas: ${j?.summary?.updated_count ?? 0} • Ignoradas por límite: ${j?.summary?.ignored_by_limit_count ?? 0}`
+        `Guardado OK • Filas: ${j?.summary?.saved_count ?? 0} • Activos: ${j?.summary?.active_count ?? 0} • URLs: ${j?.summary?.url_count ?? 0}`
       );
 
-      setPaste("");
-      setSelectedFileName("");
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      await loadExisting(clientId);
+      await loadRows(clientId);
     } catch (e: any) {
       setErr(e?.message || "Error guardando");
     } finally {
@@ -533,65 +475,42 @@ export default function SkuUrlsPage() {
     }
   }
 
-  async function importMerge() {
-    setImporting(true);
-    setErr(null);
-    setMsg(null);
+  function selectAllAllowed() {
+    if (!rows.length) return;
 
-    try {
-      if (!clientId) throw new Error("Elegí un cliente primero.");
-      if (paste.trim().length === 0) {
-        throw new Error("Pegá contenido antes de importar.");
+    const maxSkus = planInfo?.max_skus ?? null;
+    const currentRows = [...rows];
+    const nextDraft: Record<string, DraftRow> = {};
+
+    let remaining: number = maxSkus === null ? Infinity : maxSkus;
+
+    for (const row of currentRows) {
+      if (remaining > 0) {
+        nextDraft[row.sku] = {
+          ...(draft[row.sku] || {}),
+          is_active: true,
+        };
+        remaining--;
+      } else {
+        nextDraft[row.sku] = {
+          ...(draft[row.sku] || {}),
+          is_active: false,
+        };
       }
-
-      const r = await fetch("/api/admin/sku-urls/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          client_id: clientId,
-          text: paste,
-        }),
-      });
-
-      const j = await r.json().catch(() => ({}));
-
-      if (!r.ok) throw new Error(j?.error || "Error importando");
-
-      setMsg(
-        `Importación OK • Aplicadas: ${j?.summary?.applied_count ?? 0} • Insertadas: ${j?.summary?.inserted_count ?? 0} • Actualizadas: ${j?.summary?.updated_count ?? 0} • Inválidas: ${j?.summary?.invalid_count ?? 0} • Fuera de catálogo: ${j?.summary?.ignored_not_allowed_count ?? 0} • Ignoradas por límite: ${j?.summary?.ignored_by_limit_count ?? 0}`
-      );
-
-      setPaste("");
-      setSelectedFileName("");
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      await loadExisting(clientId);
-    } catch (e: any) {
-      setErr(e?.message || "Error importando");
-    } finally {
-      setImporting(false);
     }
+
+    setDraft((prev) => ({ ...prev, ...nextDraft }));
   }
 
-  async function handleCsvFile(file: File) {
-    setErr(null);
-    setMsg(null);
-    setReadingFile(true);
-
-    try {
-      const text = await file.text();
-
-      if (!text || !text.trim()) {
-        throw new Error("El archivo CSV está vacío.");
-      }
-
-      setPaste(text);
-      setSelectedFileName(file.name);
-      setMsg(`CSV cargado: ${file.name}`);
-    } catch (e: any) {
-      setErr(e?.message || "No se pudo leer el archivo CSV");
-    } finally {
-      setReadingFile(false);
-    }
+  function clearAllActive() {
+    const nextDraft: Record<string, DraftRow> = {};
+    rows.forEach((row) => {
+      nextDraft[row.sku] = {
+        ...(draft[row.sku] || {}),
+        is_active: false,
+      };
+    });
+    setDraft((prev) => ({ ...prev, ...nextDraft }));
   }
 
   useEffect(() => {
@@ -600,13 +519,13 @@ export default function SkuUrlsPage() {
   }, []);
 
   useEffect(() => {
-    loadExisting(clientId);
+    loadRows(clientId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId]);
 
   return (
     <div style={styles.page}>
-      <h1 style={styles.pageTitle}>URLs por SKU</h1>
+      <h1 style={styles.pageTitle}>SKUs y URLs por cliente</h1>
 
       <div style={styles.card}>
         <div style={styles.sectionTitle}>Cliente y acciones generales</div>
@@ -625,33 +544,35 @@ export default function SkuUrlsPage() {
           </select>
 
           <button
-            onClick={() => loadExisting(clientId)}
-            disabled={!clientId || loadingExisting}
+            onClick={() => loadRows(clientId)}
+            disabled={!clientId || loadingRows}
             style={styles.buttonSecondary}
           >
-            {loadingExisting ? "Cargando..." : "Recargar URLs"}
+            {loadingRows ? "Cargando..." : "Recargar SKUs"}
           </button>
 
           <button
-            onClick={() => {
-              if (!clientId) return;
-              window.location.href = `/api/admin/sku-urls/template?client_id=${encodeURIComponent(clientId)}`;
-            }}
-            disabled={!clientId}
+            onClick={selectAllAllowed}
+            disabled={!clientId || !rows.length}
             style={styles.buttonSecondary}
           >
-            Exportar plantilla CSV
+            Seleccionar todos
           </button>
 
           <button
-            onClick={() => {
-              if (!clientId) return;
-              window.location.href = `/api/admin/sku-urls/export?client_id=${encodeURIComponent(clientId)}`;
-            }}
-            disabled={!clientId}
+            onClick={clearAllActive}
+            disabled={!clientId || !rows.length}
             style={styles.buttonSecondary}
           >
-            Exportar CSV con URLs existentes
+            Quitar todos
+          </button>
+
+          <button
+            onClick={saveAll}
+            disabled={!clientId || !rows.length || saving || !hasChanges}
+            style={styles.buttonPrimary}
+          >
+            {saving ? "Guardando..." : "Guardar cambios"}
           </button>
         </div>
       </div>
@@ -659,10 +580,13 @@ export default function SkuUrlsPage() {
       {selectedClient && (
         <div style={styles.card}>
           <div style={styles.sectionTitle}>Resumen del cliente</div>
+
           <div style={styles.row}>
             <div style={styles.metricCard}>
               <div style={styles.metricLabel}>Cliente</div>
-              <div style={styles.metricValue}>{selectedClient.nombre || selectedClient.slug || selectedClient.id}</div>
+              <div style={styles.metricValue}>
+                {selectedClient.nombre || selectedClient.slug || selectedClient.id}
+              </div>
             </div>
 
             <div style={styles.metricCard}>
@@ -676,19 +600,43 @@ export default function SkuUrlsPage() {
             </div>
 
             <div style={styles.metricCard}>
-              <div style={styles.metricLabel}>URLs permitidas</div>
-              <div style={styles.metricValue}>{planInfo?.allowed_total ?? "Ilimitado"}</div>
+              <div style={styles.metricLabel}>Catálogo permitido</div>
+              <div style={styles.metricValue}>{selectedClient.catalog_scope || "—"}</div>
             </div>
 
             <div style={styles.metricCard}>
-              <div style={styles.metricLabel}>Cargadas</div>
-              <div style={styles.metricValue}>{planInfo?.filled ?? 0}</div>
+              <div style={styles.metricLabel}>SKUs activos</div>
+              <div style={styles.metricValue}>
+                {activeCountDraft} / {planInfo?.max_skus ?? "∞"}
+              </div>
             </div>
 
             <div style={styles.metricCard}>
-              <div style={styles.metricLabel}>Disponibles</div>
-              <div style={styles.metricValue}>{planInfo?.remaining ?? "∞"}</div>
+              <div style={styles.metricLabel}>URLs producto</div>
+              <div style={styles.metricValue}>
+                {urlCountDraft} / {planInfo?.max_urls ?? "∞"}
+              </div>
             </div>
+          </div>
+
+          <div style={{ ...styles.row, marginTop: 12 }}>
+            {planInfo?.max_skus !== null && activeCountDraft > (planInfo?.max_skus || 0) ? (
+              <span style={styles.badgeWarn}>
+                Exceso de SKUs activos: {activeCountDraft - (planInfo?.max_skus || 0)}
+              </span>
+            ) : null}
+
+            {planInfo?.max_urls !== null && urlCountDraft > (planInfo?.max_urls || 0) ? (
+              <span style={styles.badgeWarn}>
+                Exceso de URLs: {urlCountDraft - (planInfo?.max_urls || 0)}
+              </span>
+            ) : null}
+
+            {isPrimePlan(selectedClient.plan) ? (
+              <span style={styles.chip}>PRIME: deep links FaceLens habilitados</span>
+            ) : (
+              <span style={styles.chip}>GO: deep links visibles solo como referencia</span>
+            )}
           </div>
         </div>
       )}
@@ -697,214 +645,207 @@ export default function SkuUrlsPage() {
       {msg && <div style={styles.infoOk}>{msg}</div>}
 
       <div style={styles.card}>
-        <div style={styles.sectionTitle}>Carga masiva / CSV</div>
+        <div style={styles.sectionTitle}>Filtros y búsqueda</div>
 
-        <div style={{ ...styles.muted, marginBottom: 8 }}>
-          Pegado masivo o CSV (SKU,URL o SKU&lt;TAB&gt;URL). Detectadas: <b>{parsed.length}</b>
-        </div>
-
-        <div style={{ ...styles.row, marginBottom: 12 }}>
+        <div style={styles.row}>
           <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv,text/csv"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handleCsvFile(file);
-            }}
-            style={{ maxWidth: 320 }}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por SKU 100..., RB, modelo, categoría o URL"
+            style={styles.input}
           />
 
+          <select
+            value={filterActive}
+            onChange={(e) => setFilterActive(e.target.value as "all" | "active" | "inactive")}
+            style={{ ...styles.select, minWidth: 170 }}
+          >
+            <option value="all">Todos</option>
+            <option value="active">Activos</option>
+            <option value="inactive">Inactivos</option>
+          </select>
+
+          <select
+            value={filterCategory}
+            onChange={(e) => setFilterCategory(e.target.value)}
+            style={{ ...styles.select, minWidth: 220 }}
+          >
+            <option value="all">Todas las categorías</option>
+            {categories.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={filterCatalog}
+            onChange={(e) => setFilterCatalog(e.target.value)}
+            style={{ ...styles.select, minWidth: 220 }}
+          >
+            <option value="all">Todos los catálogos</option>
+            {catalogs.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+
           <button
-            type="button"
             onClick={() => {
-              setPaste("");
-              setSelectedFileName("");
-              if (fileInputRef.current) fileInputRef.current.value = "";
+              setSearch("");
+              setFilterActive("all");
+              setFilterCategory("all");
+              setFilterCatalog("all");
             }}
             style={styles.buttonSecondary}
           >
-            Limpiar carga
+            Limpiar filtros
           </button>
-
-          <div style={styles.muted}>
-            {readingFile
-              ? "Leyendo CSV..."
-              : selectedFileName
-              ? `Archivo: ${selectedFileName}`
-              : "Sin archivo cargado"}
-          </div>
         </div>
 
-        {(paste.trim() || selectedFileName) && (
-          <div style={{ ...styles.row, marginBottom: 12 }}>
-            <div style={styles.metricCard}>
-              <div style={styles.metricLabel}>Líneas detectadas</div>
-              <div style={styles.metricValue}>{parseStats.totalLines}</div>
-            </div>
-
-            <div style={styles.metricCard}>
-              <div style={styles.metricLabel}>Filas válidas</div>
-              <div style={styles.metricValue}>{parseStats.validRows}</div>
-            </div>
-
-            <div style={styles.metricCard}>
-              <div style={styles.metricLabel}>SKUs únicos</div>
-              <div style={styles.metricValue}>{parseStats.uniqueRows}</div>
-            </div>
-
-            <div style={styles.metricCard}>
-              <div style={styles.metricLabel}>Duplicadas</div>
-              <div style={styles.metricValue}>{parseStats.duplicateRows}</div>
-            </div>
-
-            <div style={styles.metricCard}>
-              <div style={styles.metricLabel}>Inválidas</div>
-              <div style={styles.metricValue}>{parseStats.invalidRows}</div>
-            </div>
-          </div>
-        )}
-
-        {limitPreview && (
-          <div
-            style={{
-              marginBottom: 12,
-              padding: 12,
-              borderRadius: 14,
-              border: `1px solid ${limitPreview.wouldExceedCount > 0 ? "#fecaca" : "#bbf7d0"}`,
-              background: limitPreview.wouldExceedCount > 0 ? "#fff1f2" : "#f0fdf4",
-            }}
-          >
-            <div style={{ marginBottom: 8, fontWeight: 700, color: "#374151" }}>
-              Vista previa contra el límite del plan
-            </div>
-
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
-              <div>Updates: <b>{limitPreview.updateCount}</b></div>
-              <div>Nuevos: <b>{limitPreview.newCount}</b></div>
-              <div>Entrarían: <b>{limitPreview.wouldFitCount}</b></div>
-              <div>Exceden: <b>{limitPreview.wouldExceedCount}</b></div>
-            </div>
-
-            {limitPreview.wouldExceedCount > 0 ? (
-              <>
-                <div style={{ color: "#991b1b", marginBottom: 6 }}>
-                  Atención: hay SKUs nuevos que exceden el cupo disponible. El backend los va a ignorar.
-                </div>
-                <div style={{ color: "#991b1b", fontSize: 13 }}>
-                  SKUs excedentes: {limitPreview.exceedingSkus.join(", ")}
-                </div>
-              </>
-            ) : (
-              <div style={{ color: "#166534" }}>
-                No se detectan excedentes por límite antes de enviar.
-              </div>
-            )}
-          </div>
-        )}
-
-        <textarea
-          value={paste}
-          onChange={(e) => setPaste(e.target.value)}
-          placeholder={`100101,https://www.tienda24x7.net/productos/...\n100103\thttps://www.tienda24x7.net/productos/...`}
-          style={styles.textarea}
-        />
-
-        <div style={{ ...styles.row, marginTop: 12 }}>
-          <button onClick={saveGrid} disabled={!clientId || saving} style={styles.buttonPrimary}>
-            {saving ? "Guardando..." : "Guardar grilla"}
-          </button>
-
-          <button onClick={importMerge} disabled={!clientId || importing} style={styles.buttonSuccess}>
-            {importing ? "Importando..." : "Importar y mergear"}
-          </button>
-
-          <div style={styles.muted}>
-            Filas catálogo: <b>{existing.length}</b>
-          </div>
+        <div style={{ ...styles.muted, marginTop: 10 }}>
+          Mostrando <b>{filteredRows.length}</b> de <b>{rows.length}</b> SKUs permitidos
         </div>
       </div>
 
       <div style={styles.card}>
-        <div style={styles.sectionTitle}>Catálogo y búsqueda</div>
-
-        <div style={{ marginBottom: 10 }}>
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por SKU, RB, nombre o URL"
-            style={styles.input}
-          />
-        </div>
-
-        <div style={{ ...styles.muted, marginBottom: 8 }}>
-          Mostrando <b>{filteredExisting.length}</b> de <b>{existing.length}</b> filas
-        </div>
+        <div style={styles.sectionTitle}>Catálogo operativo del cliente</div>
 
         <div style={styles.tableWrap}>
           <table style={styles.table}>
             <thead>
               <tr>
-                {["sku", "rb", "nombre", "url", "url_probador", "acciones"].map((h) => (
+                {[
+                  "activo",
+                  "sku",
+                  "rb",
+                  "modelo",
+                  "categoría",
+                  "catálogos",
+                  "url_producto",
+                  "url_probador",
+                  "acciones",
+                ].map((h) => (
                   <th key={h} style={styles.th}>
                     {h}
                   </th>
                 ))}
               </tr>
             </thead>
+
             <tbody>
-              {filteredExisting.map((r, idx) => {
-                const tryOnUrl = buildTryOnUrl(
-                  FACELENS_LIVE_BASE_URL,
-                  selectedClient?.slug,
-                  r.sku
-                );
+              {filteredRows.map((row) => {
+                const currentActive = !!getValue(row, "is_active");
+                const currentUrl = normUrl(getValue(row, "url"));
+                const tryOnUrl = row.try_on_url || "";
+                const deepLinkAllowed = isPrimePlan(selectedClient?.plan);
 
                 return (
-                  <tr key={`${r.sku}-${idx}`}>
-                    <td style={{ ...styles.td, fontFamily: "monospace" }}>{r.sku}</td>
-                    <td style={{ ...styles.td, fontFamily: "monospace" }}>{r.rb || ""}</td>
-                    <td style={styles.td}>{r.nombre || ""}</td>
+                  <tr key={row.sku}>
                     <td style={styles.td}>
-                      {r.url ? (
-                        <a href={r.url} target="_blank" rel="noreferrer">
-                          {r.url}
-                        </a>
+                      <label style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={currentActive}
+                          onChange={(e) => setField(row.sku, "is_active", e.target.checked)}
+                        />
+                        {currentActive ? "Sí" : "No"}
+                      </label>
+                    </td>
+
+                    <td style={{ ...styles.td, fontFamily: "monospace" }}>{row.sku}</td>
+
+                    <td style={{ ...styles.td, fontFamily: "monospace" }}>{row.rb || ""}</td>
+
+                    <td style={styles.td}>{row.nombre || ""}</td>
+
+                    <td style={styles.td}>{row.categoria || ""}</td>
+
+                    <td style={styles.td}>
+                      {(row.catalogos || []).length ? (
+                        row.catalogos.map((c) => (
+                          <span key={`${row.sku}-${c}`} style={styles.chip}>
+                            {c}
+                          </span>
+                        ))
                       ) : (
-                        ""
+                        <span style={styles.muted}>—</span>
                       )}
                     </td>
+
+                    <td style={styles.td}>
+                      <input
+                        value={currentUrl}
+                        onChange={(e) => setField(row.sku, "url", e.target.value)}
+                        placeholder="https://..."
+                        style={styles.inputSmall}
+                      />
+                    </td>
+
                     <td style={styles.td}>
                       {tryOnUrl ? (
-                        <a
-                          href={tryOnUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={tryOnUrl}
-                          style={styles.urlBox}
-                        >
-                          {tryOnUrl}
-                        </a>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          <a
+                            href={tryOnUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={tryOnUrl}
+                            style={{
+                              ...styles.urlBox,
+                              opacity: deepLinkAllowed ? 1 : 0.65,
+                            }}
+                          >
+                            {tryOnUrl}
+                          </a>
+                          {!deepLinkAllowed && (
+                            <span style={styles.muted}>Disponible comercialmente en PRIME</span>
+                          )}
+                        </div>
                       ) : (
                         <span style={styles.muted}>Sin URL</span>
                       )}
                     </td>
+
                     <td style={styles.td}>
-                      <button
-                        onClick={() => copyTryOnUrl(r)}
-                        disabled={!tryOnUrl}
-                        style={styles.buttonSecondary}
-                      >
-                        {copiedSku === r.sku ? "Copiada" : "Copiar URL"}
-                      </button>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button
+                          onClick={() =>
+                            copyText(
+                              currentUrl,
+                              `product-${row.sku}`,
+                              `URL de producto copiada para SKU ${row.sku}`
+                            )
+                          }
+                          disabled={!currentUrl}
+                          style={styles.buttonSecondary}
+                        >
+                          {copiedKey === `product-${row.sku}` ? "Copiada" : "Copiar URL producto"}
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            copyText(
+                              tryOnUrl,
+                              `tryon-${row.sku}`,
+                              `URL FaceLens copiada para SKU ${row.sku}`
+                            )
+                          }
+                          disabled={!tryOnUrl}
+                          style={styles.buttonSecondary}
+                        >
+                          {copiedKey === `tryon-${row.sku}` ? "Copiada" : "Copiar URL FaceLens"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
               })}
-              {filteredExisting.length === 0 && (
+
+              {filteredRows.length === 0 && (
                 <tr>
-                  <td colSpan={6} style={{ ...styles.td, color: "#6b7280" }}>
-                    No hay filas para mostrar con el filtro actual.
+                  <td colSpan={9} style={{ ...styles.td, color: "#6b7280" }}>
+                    No hay SKUs para mostrar con el filtro actual.
                   </td>
                 </tr>
               )}
