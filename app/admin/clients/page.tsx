@@ -245,6 +245,45 @@ const styles = {
     textOverflow: "ellipsis",
     fontSize: 12,
   } as React.CSSProperties,
+
+  badge: {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "4px 10px",
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: 600,
+    border: "1px solid #d1d5db",
+    background: "#fff",
+    color: "#374151",
+  } as React.CSSProperties,
+
+  detailCard: {
+    padding: 14,
+    borderRadius: 14,
+    border: "1px solid #e5e7eb",
+    background: "#fafafa",
+  } as React.CSSProperties,
+
+  detailGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(280px, 1fr))",
+    gap: 14,
+  } as React.CSSProperties,
+
+  sectionBox: {
+    border: "1px solid #e5e7eb",
+    borderRadius: 14,
+    padding: 12,
+    background: "#fff",
+  } as React.CSSProperties,
+
+  sectionBoxTitle: {
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#374151",
+    marginBottom: 10,
+  } as React.CSSProperties,
 };
 
 export default function ClientsPage() {
@@ -256,6 +295,7 @@ export default function ClientsPage() {
   const [loading, setLoading] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [archivingId, setArchivingId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [logoFileById, setLogoFileById] = useState<Record<string, File | null>>({});
@@ -934,20 +974,12 @@ export default function ClientsPage() {
             <thead>
               <tr>
                 {[
-                  "id",
-                  "nombre",
+                  "cliente",
                   "slug",
                   "plan",
                   "comercial",
-                  "link_app",
-                  "link_metricas",
-                  "catalog_scope",
-                  "catalog_slug",
-                  "whatsapp",
-                  "default_url",
-                  "branding",
-                  "logo",
-                  "activo",
+                  "estado",
+                  "links",
                   "acciones",
                 ].map((h) => (
                   <th key={h} style={styles.th}>
@@ -966,283 +998,381 @@ export default function ClientsPage() {
                   String(getValue(r, "metrics_token") ?? "")
                 );
 
-                const hasChanges = Object.keys(draft[r.id] || {}).length > 0;
+                const hasChangesRow = Object.keys(draft[r.id] || {}).length > 0;
                 const isBusy = savingId === r.id || archivingId === r.id;
+                const isExpanded = expandedId === r.id;
 
                 const currentPrimary = normalizeHexColor(getValue(r, "color_primario"), "#111111");
                 const currentSecondary = normalizeHexColor(getValue(r, "olor_secundario"), "#0F0F0F");
 
                 return (
-                  <tr key={r.id}>
-                    <td style={{ ...styles.td, fontFamily: "monospace", whiteSpace: "nowrap" }}>{r.id}</td>
-
-                    <td style={styles.td}>
-                      <input
-                        value={getValue(r, "nombre") ?? ""}
-                        onChange={(e) => setField(r.id, "nombre", e.target.value)}
-                        style={{ ...styles.input, width: 220 }}
-                      />
-                    </td>
-
-                    <td style={styles.td}>
-                      <input
-                        value={getValue(r, "slug") ?? ""}
-                        onChange={(e) => setField(r.id, "slug", e.target.value)}
-                        style={{ ...styles.input, width: 200 }}
-                      />
-                    </td>
-
-                    <td style={styles.td}>
-                      <select
-                        value={String(getValue(r, "plan") ?? "")}
-                        onChange={(e) => setField(r.id, "plan", e.target.value)}
-                        style={{ ...styles.select, width: 150 }}
-                      >
-                        {planOptions.length === 0 ? (
-                          <option value="">Sin planes</option>
-                        ) : (
-                          planOptions.map((plan) => (
-                            <option key={plan} value={plan}>
-                              {plan}
-                            </option>
-                          ))
-                        )}
-                      </select>
-                    </td>
-
-                    <td style={styles.td}>
-                      <input
-                        value={getValue(r, "comercial") ?? ""}
-                        onChange={(e) => setField(r.id, "comercial", e.target.value)}
-                        style={{ ...styles.input, width: 180 }}
-                        placeholder="Sin asignar"
-                      />
-                    </td>
-
-                    <td style={styles.td}>
-                      {appUrl ? (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                          <a
-                            href={appUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            title={appUrl}
-                            style={styles.linkBox}
-                          >
-                            {appUrl}
-                          </a>
-                          <button
-                            onClick={() =>
-                              copyText(appUrl, `app-${r.id}`, `✅ Link app copiado para ${r.nombre || r.slug || r.id}`)
-                            }
-                            style={{ ...styles.buttonSecondary, padding: "7px 12px" }}
-                          >
-                            {copiedKey === `app-${r.id}` ? "Copiado" : "Copiar"}
-                          </button>
+                  <>
+                    <tr key={r.id}>
+                      <td style={styles.td}>
+                        <div style={{ fontWeight: 700 }}>{getValue(r, "nombre") || "—"}</div>
+                        <div style={{ ...styles.muted, fontSize: 12, marginTop: 4, fontFamily: "monospace" }}>
+                          {r.id}
                         </div>
-                      ) : (
-                        <span style={styles.muted}>Sin slug</span>
-                      )}
-                    </td>
+                      </td>
 
-                    <td style={styles.td}>
-                      {dashboardUrl ? (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                          <a
-                            href={dashboardUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            title={dashboardUrl}
-                            style={styles.linkBox}
-                          >
-                            {dashboardUrl}
-                          </a>
-                          <button
-                            onClick={() =>
-                              copyText(
-                                dashboardUrl,
-                                `dash-${r.id}`,
-                                `✅ Link métricas copiado para ${r.nombre || r.slug || r.id}`
-                              )
-                            }
-                            style={{ ...styles.buttonSecondary, padding: "7px 12px" }}
-                          >
-                            {copiedKey === `dash-${r.id}` ? "Copiado" : "Copiar"}
-                          </button>
-                        </div>
-                      ) : isPrimePlan(String(getValue(r, "plan") ?? "")) ? (
-                        <span style={styles.muted}>Falta token métricas</span>
-                      ) : (
-                        <span style={styles.muted}>Solo planes PRIME</span>
-                      )}
-                    </td>
+                      <td style={styles.td}>
+                        <div style={{ fontFamily: "monospace" }}>{getValue(r, "slug") || "—"}</div>
+                      </td>
 
-                    <td style={styles.td}>
-                      <select
-                        value={String(getValue(r, "catalog_scope") ?? "ALL")}
-                        onChange={(e) => setField(r.id, "catalog_scope", e.target.value)}
-                        style={{ ...styles.select, width: 150 }}
-                      >
-                        {CATALOG_SCOPE_OPTIONS.map((scope) => (
-                          <option key={scope} value={scope}>
-                            {scope}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
+                      <td style={styles.td}>
+                        <span style={styles.badge}>{String(getValue(r, "plan") || "—")}</span>
+                      </td>
 
-                    <td style={styles.td}>
-                      <input
-                        value={getValue(r, "catalog_slug") ?? ""}
-                        onChange={(e) => setField(r.id, "catalog_slug", e.target.value)}
-                        style={{ ...styles.input, width: 160 }}
-                      />
-                    </td>
+                      <td style={styles.td}>
+                        {getValue(r, "comercial") || <span style={styles.muted}>Sin asignar</span>}
+                      </td>
 
-                    <td style={styles.td}>
-                      <input
-                        value={getValue(r, "whatsapp") ?? ""}
-                        onChange={(e) => setField(r.id, "whatsapp", e.target.value)}
-                        style={{ ...styles.input, width: 160 }}
-                      />
-                    </td>
-
-                    <td style={styles.td}>
-                      <input
-                        value={getValue(r, "default_url") ?? ""}
-                        onChange={(e) => setField(r.id, "default_url", e.target.value)}
-                        style={{ ...styles.input, width: 320 }}
-                      />
-                    </td>
-
-                    <td style={styles.td}>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 210 }}>
-                        <div style={{ ...styles.fieldWrap }}>
-                          <div style={styles.label}>Primario</div>
-                          <div style={{ ...styles.row, gap: 8 }}>
-                            <input
-                              type="color"
-                              value={currentPrimary}
-                              onChange={(e) => setField(r.id, "color_primario", e.target.value)}
-                              style={{ width: 42, height: 34, padding: 0, border: "1px solid #ddd", borderRadius: 8 }}
-                            />
-                            <input
-                              value={String(getValue(r, "color_primario") ?? currentPrimary)}
-                              onChange={(e) => setField(r.id, "color_primario", e.target.value)}
-                              style={{ ...styles.input, width: 120 }}
-                              placeholder="#111111"
-                            />
-                          </div>
-                        </div>
-
-                        <div style={{ ...styles.fieldWrap }}>
-                          <div style={styles.label}>Secundario</div>
-                          <div style={{ ...styles.row, gap: 8 }}>
-                            <input
-                              type="color"
-                              value={currentSecondary}
-                              onChange={(e) => setField(r.id, "olor_secundario", e.target.value)}
-                              style={{ width: 42, height: 34, padding: 0, border: "1px solid #ddd", borderRadius: 8 }}
-                            />
-                            <input
-                              value={String(getValue(r, "olor_secundario") ?? currentSecondary)}
-                              onChange={(e) => setField(r.id, "olor_secundario", e.target.value)}
-                              style={{ ...styles.input, width: 120 }}
-                              placeholder="#0F0F0F"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-
-                    <td style={styles.td}>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        <div style={{ ...styles.row, alignItems: "center" }}>
-                          <input
-                            type="file"
-                            accept="image/png,image/jpeg,image/webp"
-                            onChange={(e) => {
-                              const f = e.target.files?.[0] || null;
-                              setLogoFileById((prev) => ({ ...prev, [r.id]: f }));
-                            }}
-                            style={{ maxWidth: 180 }}
-                          />
-                          <button
-                            onClick={() => uploadLogoForClient(r.id)}
-                            disabled={uploadingId === r.id || !logoFileById[r.id]}
-                            style={{
-                              ...styles.buttonSecondary,
-                              padding: "7px 12px",
-                              opacity: uploadingId === r.id ? 0.7 : 1,
-                              cursor: uploadingId === r.id ? "wait" : "pointer",
-                            }}
-                          >
-                            {uploadingId === r.id ? "Subiendo..." : "Subir logo"}
-                          </button>
-                        </div>
-
-                        {r.logo_url ? (
-                          <a href={r.logo_url} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>
-                            Ver logo
-                          </a>
-                        ) : (
-                          <span style={{ fontSize: 12, color: "#6b7280" }}>Sin logo</span>
-                        )}
-
-                        {draft[r.id]?.logo_url ? (
-                          <div style={{ fontSize: 12, color: "#6b7280" }}>
-                            (pendiente guardar logo_url en draft)
-                          </div>
+                      <td style={styles.td}>
+                        <span
+                          style={{
+                            ...styles.badge,
+                            background: getValue(r, "activo") ? "#ecfdf5" : "#fef2f2",
+                            borderColor: getValue(r, "activo") ? "#a7f3d0" : "#fecaca",
+                            color: getValue(r, "activo") ? "#065f46" : "#991b1b",
+                          }}
+                        >
+                          {getValue(r, "activo") ? "Activo" : "Inactivo"}
+                        </span>
+                        {hasChangesRow ? (
+                          <div style={{ color: "#b45309", fontSize: 12, marginTop: 6 }}>Cambios sin guardar</div>
                         ) : null}
-                      </div>
-                    </td>
+                      </td>
 
-                    <td style={styles.td}>
-                      <label style={styles.checkboxLabel}>
-                        <input
-                          type="checkbox"
-                          checked={!!getValue(r, "activo")}
-                          onChange={(e) => setField(r.id, "activo", e.target.checked)}
-                        />
-                        {getValue(r, "activo") ? "✅" : "❌"}
-                      </label>
-                    </td>
+                      <td style={styles.td}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          {appUrl ? (
+                            <a href={appUrl} target="_blank" rel="noreferrer" style={styles.linkBox} title={appUrl}>
+                              App cliente
+                            </a>
+                          ) : (
+                            <span style={styles.muted}>Sin link app</span>
+                          )}
 
-                    <td style={styles.td}>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        <button
-                          onClick={() => saveRow(r.id)}
-                          disabled={isBusy || !hasChanges}
-                          style={{
-                            ...styles.buttonSuccess,
-                            padding: "7px 12px",
-                            opacity: isBusy ? 0.7 : 1,
-                            cursor: isBusy ? "wait" : "pointer",
-                          }}
-                        >
-                          {savingId === r.id ? "Guardando..." : "Guardar"}
-                        </button>
+                          {dashboardUrl ? (
+                            <a
+                              href={dashboardUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={styles.linkBox}
+                              title={dashboardUrl}
+                            >
+                              Dashboard
+                            </a>
+                          ) : isPrimePlan(String(getValue(r, "plan") ?? "")) ? (
+                            <span style={styles.muted}>Falta token métricas</span>
+                          ) : (
+                            <span style={styles.muted}>Solo PRIME</span>
+                          )}
+                        </div>
+                      </td>
 
-                        <button
-                          onClick={() => archiveClient(r)}
-                          disabled={isBusy}
-                          style={{
-                            ...styles.buttonDanger,
-                            opacity: isBusy ? 0.7 : 1,
-                            cursor: isBusy ? "wait" : "pointer",
-                          }}
-                        >
-                          {archivingId === r.id ? "Archivando..." : "Archivar"}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                      <td style={styles.td}>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button
+                            onClick={() => setExpandedId(isExpanded ? null : r.id)}
+                            style={styles.buttonSecondary}
+                          >
+                            {isExpanded ? "Ocultar" : "Ver / Editar"}
+                          </button>
+
+                          <button
+                            onClick={() => saveRow(r.id)}
+                            disabled={isBusy || !hasChangesRow}
+                            style={{
+                              ...styles.buttonSuccess,
+                              opacity: isBusy || !hasChangesRow ? 0.7 : 1,
+                              cursor: isBusy ? "wait" : "pointer",
+                            }}
+                          >
+                            {savingId === r.id ? "Guardando..." : "Guardar"}
+                          </button>
+
+                          <button
+                            onClick={() => archiveClient(r)}
+                            disabled={isBusy}
+                            style={{
+                              ...styles.buttonDanger,
+                              opacity: isBusy ? 0.7 : 1,
+                              cursor: isBusy ? "wait" : "pointer",
+                            }}
+                          >
+                            {archivingId === r.id ? "Archivando..." : "Archivar"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    {isExpanded ? (
+                      <tr key={`${r.id}-detail`}>
+                        <td colSpan={7} style={styles.td}>
+                          <div style={styles.detailCard}>
+                            <div style={styles.detailGrid}>
+                              <div style={styles.sectionBox}>
+                                <div style={styles.sectionBoxTitle}>Datos básicos</div>
+
+                                <div style={{ ...styles.row, alignItems: "flex-start" }}>
+                                  <div style={{ ...styles.fieldWrap, minWidth: 220, flex: "1 1 220px" }}>
+                                    <div style={styles.label}>Nombre</div>
+                                    <input
+                                      value={getValue(r, "nombre") ?? ""}
+                                      onChange={(e) => setField(r.id, "nombre", e.target.value)}
+                                      style={{ ...styles.input, width: "100%" }}
+                                    />
+                                  </div>
+
+                                  <div style={{ ...styles.fieldWrap, minWidth: 220, flex: "1 1 220px" }}>
+                                    <div style={styles.label}>Slug</div>
+                                    <input
+                                      value={getValue(r, "slug") ?? ""}
+                                      onChange={(e) => setField(r.id, "slug", e.target.value)}
+                                      style={{ ...styles.input, width: "100%" }}
+                                    />
+                                  </div>
+
+                                  <div style={{ ...styles.fieldWrap, minWidth: 170 }}>
+                                    <div style={styles.label}>Plan</div>
+                                    <select
+                                      value={String(getValue(r, "plan") ?? "")}
+                                      onChange={(e) => setField(r.id, "plan", e.target.value)}
+                                      style={{ ...styles.select, width: 170 }}
+                                    >
+                                      {planOptions.length === 0 ? (
+                                        <option value="">Sin planes</option>
+                                      ) : (
+                                        planOptions.map((plan) => (
+                                          <option key={plan} value={plan}>
+                                            {plan}
+                                          </option>
+                                        ))
+                                      )}
+                                    </select>
+                                  </div>
+
+                                  <div style={{ ...styles.fieldWrap, minWidth: 220, flex: "1 1 220px" }}>
+                                    <div style={styles.label}>Comercial</div>
+                                    <input
+                                      value={getValue(r, "comercial") ?? ""}
+                                      onChange={(e) => setField(r.id, "comercial", e.target.value)}
+                                      style={{ ...styles.input, width: "100%" }}
+                                      placeholder="Sin asignar"
+                                    />
+                                  </div>
+
+                                  <div style={{ ...styles.fieldWrap, minWidth: 160 }}>
+                                    <div style={styles.label}>Activo</div>
+                                    <label style={styles.checkboxLabel}>
+                                      <input
+                                        type="checkbox"
+                                        checked={!!getValue(r, "activo")}
+                                        onChange={(e) => setField(r.id, "activo", e.target.checked)}
+                                      />
+                                      {getValue(r, "activo") ? "Sí" : "No"}
+                                    </label>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div style={styles.sectionBox}>
+                                <div style={styles.sectionBoxTitle}>Catálogo y contacto</div>
+
+                                <div style={{ ...styles.row, alignItems: "flex-start" }}>
+                                  <div style={{ ...styles.fieldWrap, minWidth: 160 }}>
+                                    <div style={styles.label}>catalog_scope</div>
+                                    <select
+                                      value={String(getValue(r, "catalog_scope") ?? "ALL")}
+                                      onChange={(e) => setField(r.id, "catalog_scope", e.target.value)}
+                                      style={{ ...styles.select, width: 160 }}
+                                    >
+                                      {CATALOG_SCOPE_OPTIONS.map((scope) => (
+                                        <option key={scope} value={scope}>
+                                          {scope}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  <div style={{ ...styles.fieldWrap, minWidth: 220, flex: "1 1 220px" }}>
+                                    <div style={styles.label}>catalog_slug</div>
+                                    <input
+                                      value={getValue(r, "catalog_slug") ?? ""}
+                                      onChange={(e) => setField(r.id, "catalog_slug", e.target.value)}
+                                      style={{ ...styles.input, width: "100%" }}
+                                    />
+                                  </div>
+
+                                  <div style={{ ...styles.fieldWrap, minWidth: 220, flex: "1 1 220px" }}>
+                                    <div style={styles.label}>whatsapp</div>
+                                    <input
+                                      value={getValue(r, "whatsapp") ?? ""}
+                                      onChange={(e) => setField(r.id, "whatsapp", e.target.value)}
+                                      style={{ ...styles.input, width: "100%" }}
+                                    />
+                                  </div>
+
+                                  <div style={{ ...styles.fieldWrap, minWidth: 280, flex: "1 1 280px" }}>
+                                    <div style={styles.label}>default_url</div>
+                                    <input
+                                      value={getValue(r, "default_url") ?? ""}
+                                      onChange={(e) => setField(r.id, "default_url", e.target.value)}
+                                      style={{ ...styles.input, width: "100%" }}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div style={styles.sectionBox}>
+                                <div style={styles.sectionBoxTitle}>Branding</div>
+
+                                <div style={{ ...styles.row, alignItems: "flex-start" }}>
+                                  <div style={{ ...styles.fieldWrap }}>
+                                    <div style={styles.label}>Color primario</div>
+                                    <div style={{ ...styles.row, gap: 8 }}>
+                                      <input
+                                        type="color"
+                                        value={currentPrimary}
+                                        onChange={(e) => setField(r.id, "color_primario", e.target.value)}
+                                        style={{
+                                          width: 42,
+                                          height: 34,
+                                          padding: 0,
+                                          border: "1px solid #ddd",
+                                          borderRadius: 8,
+                                        }}
+                                      />
+                                      <input
+                                        value={String(getValue(r, "color_primario") ?? currentPrimary)}
+                                        onChange={(e) => setField(r.id, "color_primario", e.target.value)}
+                                        style={{ ...styles.input, width: 130 }}
+                                        placeholder="#111111"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  <div style={{ ...styles.fieldWrap }}>
+                                    <div style={styles.label}>Color secundario</div>
+                                    <div style={{ ...styles.row, gap: 8 }}>
+                                      <input
+                                        type="color"
+                                        value={currentSecondary}
+                                        onChange={(e) => setField(r.id, "olor_secundario", e.target.value)}
+                                        style={{
+                                          width: 42,
+                                          height: 34,
+                                          padding: 0,
+                                          border: "1px solid #ddd",
+                                          borderRadius: 8,
+                                        }}
+                                      />
+                                      <input
+                                        value={String(getValue(r, "olor_secundario") ?? currentSecondary)}
+                                        onChange={(e) => setField(r.id, "olor_secundario", e.target.value)}
+                                        style={{ ...styles.input, width: 130 }}
+                                        placeholder="#0F0F0F"
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div style={styles.sectionBox}>
+                                <div style={styles.sectionBoxTitle}>Logo y links</div>
+
+                                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                                  <div style={{ ...styles.row, alignItems: "center" }}>
+                                    <input
+                                      type="file"
+                                      accept="image/png,image/jpeg,image/webp"
+                                      onChange={(e) => {
+                                        const f = e.target.files?.[0] || null;
+                                        setLogoFileById((prev) => ({ ...prev, [r.id]: f }));
+                                      }}
+                                      style={{ maxWidth: 220 }}
+                                    />
+                                    <button
+                                      onClick={() => uploadLogoForClient(r.id)}
+                                      disabled={uploadingId === r.id || !logoFileById[r.id]}
+                                      style={{
+                                        ...styles.buttonSecondary,
+                                        opacity: uploadingId === r.id ? 0.7 : 1,
+                                        cursor: uploadingId === r.id ? "wait" : "pointer",
+                                      }}
+                                    >
+                                      {uploadingId === r.id ? "Subiendo..." : "Subir logo"}
+                                    </button>
+                                  </div>
+
+                                  <div style={{ ...styles.row, alignItems: "center" }}>
+                                    {r.logo_url ? (
+                                      <a href={r.logo_url} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>
+                                        Ver logo actual
+                                      </a>
+                                    ) : (
+                                      <span style={{ fontSize: 12, color: "#6b7280" }}>Sin logo</span>
+                                    )}
+
+                                    {appUrl ? (
+                                      <button
+                                        onClick={() =>
+                                          copyText(
+                                            appUrl,
+                                            `app-${r.id}`,
+                                            `✅ Link app copiado para ${r.nombre || r.slug || r.id}`
+                                          )
+                                        }
+                                        style={{ ...styles.buttonSecondary, padding: "7px 12px" }}
+                                      >
+                                        {copiedKey === `app-${r.id}` ? "App copiada" : "Copiar app"}
+                                      </button>
+                                    ) : null}
+
+                                    {dashboardUrl ? (
+                                      <button
+                                        onClick={() =>
+                                          copyText(
+                                            dashboardUrl,
+                                            `dash-${r.id}`,
+                                            `✅ Link métricas copiado para ${r.nombre || r.slug || r.id}`
+                                          )
+                                        }
+                                        style={{ ...styles.buttonSecondary, padding: "7px 12px" }}
+                                      >
+                                        {copiedKey === `dash-${r.id}` ? "Dashboard copiado" : "Copiar dashboard"}
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div style={{ ...styles.row, marginTop: 14, justifyContent: "flex-end" }}>
+                              <button
+                                onClick={() => saveRow(r.id)}
+                                disabled={isBusy || !hasChangesRow}
+                                style={{
+                                  ...styles.buttonSuccess,
+                                  opacity: isBusy || !hasChangesRow ? 0.7 : 1,
+                                  cursor: isBusy ? "wait" : "pointer",
+                                }}
+                              >
+                                {savingId === r.id ? "Guardando..." : "Guardar cambios"}
+                              </button>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </>
                 );
               })}
 
               {filteredRows.length === 0 && (
                 <tr>
-                  <td style={{ ...styles.td, textAlign: "center", color: "#6b7280", padding: 24 }} colSpan={15}>
+                  <td style={{ ...styles.td, textAlign: "center", color: "#6b7280", padding: 24 }} colSpan={7}>
                     No hay clientes que coincidan con los filtros aplicados.
                   </td>
                 </tr>
