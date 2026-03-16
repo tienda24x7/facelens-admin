@@ -265,6 +265,7 @@ export default function SkuUrlsPage() {
   const [loadingClients, setLoadingClients] = useState(false);
   const [loadingRows, setLoadingRows] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [applyingPreset, setApplyingPreset] = useState(false);
 
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -475,6 +476,49 @@ export default function SkuUrlsPage() {
     }
   }
 
+  async function applyPlanPreset() {
+    setApplyingPreset(true);
+    setErr(null);
+    setMsg(null);
+
+    try {
+      if (!clientId) throw new Error("Elegí un cliente primero.");
+      if (!selectedClient?.plan) throw new Error("El cliente no tiene plan asignado.");
+
+      const confirmed = window.confirm(
+        `Vas a aplicar el preset del plan ${selectedClient.plan} a este cliente.\n\nEsto reemplaza la selección activa actual de SKUs del cliente por la selección base del plan.\n\nLas URLs de producto no se modifican.\n\n¿Querés continuar?`
+      );
+
+      if (!confirmed) return;
+
+      const r = await fetch("/api/admin/sku-urls/apply-plan-preset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: clientId }),
+      });
+
+      const j = await r.json().catch(() => ({}));
+
+      if (!r.ok || !j?.ok) {
+        throw new Error(j?.error || "Error aplicando preset del plan");
+      }
+
+      setMsg(
+        `Preset aplicado OK • Plan: ${j?.summary?.plan_code ?? selectedClient.plan} • Preset total: ${
+          j?.summary?.preset_total ?? 0
+        } • Aplicables: ${j?.summary?.applicable_total ?? 0} • Filas actualizadas: ${
+          j?.summary?.updated_count ?? 0
+        }`
+      );
+
+      await loadRows(clientId);
+    } catch (e: any) {
+      setErr(e?.message || "Error aplicando preset del plan");
+    } finally {
+      setApplyingPreset(false);
+    }
+  }
+
   function selectAllAllowed() {
     if (!rows.length) return;
 
@@ -549,6 +593,14 @@ export default function SkuUrlsPage() {
             style={styles.buttonSecondary}
           >
             {loadingRows ? "Cargando..." : "Recargar SKUs"}
+          </button>
+
+          <button
+            onClick={applyPlanPreset}
+            disabled={!clientId || !rows.length || applyingPreset}
+            style={styles.buttonSecondary}
+          >
+            {applyingPreset ? "Aplicando preset..." : "Aplicar preset del plan"}
           </button>
 
           <button
