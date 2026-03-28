@@ -18,6 +18,7 @@ type ClientRow = {
   catalog_scope?: string | null;
   default_url?: string | null;
   metrics_token?: string | null;
+  locale?: string | null;
 };
 
 type PlanRow = {
@@ -31,6 +32,7 @@ type StatusFilter = "all" | "active" | "inactive";
 const FACELENS_LIVE_BASE_URL = "https://facelens-live.vercel.app";
 const FACELENS_PANEL_BASE_URL = "https://facelens-panel.vercel.app";
 const CATALOG_SCOPE_OPTIONS = ["ALL", "NICOLAS", "EZEQUIEL"];
+const LOCALE_OPTIONS = ["es", "en", "pt-BR"];
 
 function slugify(v: string) {
   return (v || "")
@@ -322,6 +324,7 @@ export default function ClientsPage() {
     sin_logo: boolean;
     color_primario: string;
     olor_secundario: string;
+    locale: string;
     slugTouched: boolean;
   }>({
     nombre: "",
@@ -337,6 +340,7 @@ export default function ClientsPage() {
     sin_logo: false,
     color_primario: "#111111",
     olor_secundario: "#0F0F0F",
+    locale: "es",
     slugTouched: false,
   });
 
@@ -615,6 +619,7 @@ export default function ClientsPage() {
         logo_url,
         color_primario,
         olor_secundario,
+        locale: createForm.locale.trim() || "es",
       };
 
       const r = await fetch("/api/admin/clients", {
@@ -641,6 +646,7 @@ export default function ClientsPage() {
         sin_logo: false,
         color_primario: "#111111",
         olor_secundario: "#0F0F0F",
+        locale: "es",
         slugTouched: false,
       });
 
@@ -723,6 +729,21 @@ export default function ClientsPage() {
                   </option>
                 ))
               )}
+            </select>
+          </div>
+
+          <div style={{ ...styles.fieldWrap, minWidth: 170 }}>
+            <div style={styles.label}>idioma</div>
+            <select
+              value={createForm.locale}
+              onChange={(e) => setCreateForm((p) => ({ ...p, locale: e.target.value }))}
+              style={{ ...styles.select, width: 170 }}
+            >
+              {LOCALE_OPTIONS.map((locale) => (
+                <option key={locale} value={locale}>
+                  {locale}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -1150,6 +1171,21 @@ export default function ClientsPage() {
                                           </option>
                                         ))
                                       )}
+                                    </select>
+                                  </div>
+
+                                  <div style={{ ...styles.fieldWrap, minWidth: 170 }}>
+                                    <div style={styles.label}>Idioma</div>
+                                    <select
+                                      value={String(getValue(r, "locale") ?? "es")}
+                                      onChange={(e) => setField(r.id, "locale", e.target.value)}
+                                      style={{ ...styles.select, width: 170 }}
+                                    >
+                                      {LOCALE_OPTIONS.map((locale) => (
+                                        <option key={locale} value={locale}>
+                                          {locale}
+                                        </option>
+                                      ))}
                                     </select>
                                   </div>
 
