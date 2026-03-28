@@ -129,6 +129,7 @@ export async function POST(req: Request) {
       catalog_slug: cleanStr(body.catalog_slug),
       catalog_scope: cleanStr(body.catalog_scope),
       default_url: cleanStr(body.default_url),
+      locale: cleanStr(body.locale) || "es",
       archived: false,
     };
 

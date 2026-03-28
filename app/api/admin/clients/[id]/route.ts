@@ -16,6 +16,7 @@ const ALLOWED = new Set([
   "catalog_slug",
   "catalog_scope",
   "default_url",
+  "locale",
   "archived",
 ]);
 
