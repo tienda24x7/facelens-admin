@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import * as XLSX from "xlsx";
 
 type Client = {
   id: string;
@@ -49,6 +50,14 @@ function normUrl(v: any) {
 
 function isPrimePlan(plan?: string | null) {
   return String(plan || "").trim().toUpperCase().includes("PRIME");
+}
+
+function safeFilePart(v: any) {
+  return String(v ?? "")
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_");
 }
 
 const styles = {
@@ -266,6 +275,7 @@ export default function SkuUrlsPage() {
   const [loadingRows, setLoadingRows] = useState(false);
   const [saving, setSaving] = useState(false);
   const [applyingPreset, setApplyingPreset] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -557,6 +567,67 @@ export default function SkuUrlsPage() {
     setDraft((prev) => ({ ...prev, ...nextDraft }));
   }
 
+  function exportExcel(mode: "active" | "all" = "all") {
+    setErr(null);
+    setMsg(null);
+
+    try {
+      if (!clientId) throw new Error("Elegí un cliente primero.");
+      if (!rows.length) throw new Error("No hay filas para exportar.");
+
+      const sourceRows =
+        mode === "active"
+          ? rows.filter((row) => !!getValue(row, "is_active"))
+          : rows;
+
+      if (!sourceRows.length) {
+        throw new Error(
+          mode === "active"
+            ? "No hay SKUs activos para exportar."
+            : "No hay filas para exportar."
+        );
+      }
+
+      const exportRows = sourceRows.map((row) => {
+        const currentUrl = normUrl(getValue(row, "url"));
+        const tryOnUrl = normUrl(row.try_on_url || "");
+
+        return {
+          sku: normSku(row.sku),
+          rb: String(row.rb || "").trim(),
+          mmodelo: String(row.nombre || "").trim(),
+          url_producto: currentUrl,
+          url_probador: tryOnUrl,
+        };
+      });
+
+      const worksheet = XLSX.utils.json_to_sheet(exportRows);
+      const workbook = XLSX.utils.book_new();
+
+      XLSX.utils.book_append_sheet(workbook, worksheet, "sku_urls");
+
+      const slugPart = safeFilePart(
+        selectedClient?.slug || selectedClient?.nombre || clientId || "cliente"
+      );
+
+      const suffix = mode === "active" ? "activos" : "todos";
+      const fileName = `facelens_urls_${slugPart}_${suffix}.xlsx`;
+
+      setExportingExcel(true);
+      XLSX.writeFile(workbook, fileName);
+
+      setMsg(
+        `Excel exportado OK • Tipo: ${
+          mode === "active" ? "activos" : "todos"
+        } • Filas: ${exportRows.length} • Archivo: ${fileName}`
+      );
+    } catch (e: any) {
+      setErr(e?.message || "No se pudo exportar el Excel");
+    } finally {
+      setExportingExcel(false);
+    }
+  }
+
   useEffect(() => {
     loadClients();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -617,6 +688,22 @@ export default function SkuUrlsPage() {
             style={styles.buttonSecondary}
           >
             Quitar todos
+          </button>
+
+          <button
+            onClick={() => exportExcel("active")}
+            disabled={!clientId || !rows.length || exportingExcel}
+            style={styles.buttonSuccess}
+          >
+            {exportingExcel ? "Exportando..." : "Exportar Excel (activos)"}
+          </button>
+
+          <button
+            onClick={() => exportExcel("all")}
+            disabled={!clientId || !rows.length || exportingExcel}
+            style={styles.buttonSecondary}
+          >
+            {exportingExcel ? "Exportando..." : "Exportar Excel (todos)"}
           </button>
 
           <button
