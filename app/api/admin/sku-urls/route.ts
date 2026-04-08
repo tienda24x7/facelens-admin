@@ -6,6 +6,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+const IMPORTED_PRODUCTS_TABLE = "clientes_imported_products";
+
 type SaveRow = {
   sku: string;
   url?: string;
@@ -27,6 +29,10 @@ function normalizeUrl(value: any) {
 
 function normalizeCatalog(value: any) {
   return String(value || "").trim().toUpperCase();
+}
+
+function cleanStr(value: any) {
+  return String(value ?? "").trim();
 }
 
 function isValidUrl(value: string) {
@@ -191,6 +197,40 @@ async function getAllowedUniverseForClient(client: any) {
   return out;
 }
 
+async function getImportedProductsForClient(clientId: string) {
+  try {
+    const { data, error } = await supabase
+      .from(IMPORTED_PRODUCTS_TABLE)
+      .select(
+        [
+          "cliente_id",
+          "sku",
+          "titulo",
+          "categoria",
+          "origin",
+          "external_image_url",
+          "external_product_url",
+          "external_product_id",
+          "external_variant_id",
+          "image_source",
+          "asset_status",
+          "last_sync_at",
+        ].join(",")
+      )
+      .eq("cliente_id", clientId);
+
+    if (error) {
+      console.warn("No se pudieron leer productos importados:", error.message);
+      return [];
+    }
+
+    return data || [];
+  } catch (e) {
+    console.warn("Error leyendo productos importados:", e);
+    return [];
+  }
+}
+
 export async function GET(req: NextRequest) {
   try {
     const client_id = String(new URL(req.url).searchParams.get("client_id") || "").trim();
@@ -202,6 +242,7 @@ export async function GET(req: NextRequest) {
     const client = await getClientOrThrow(client_id);
     const plan = await getPlanLimits(client.plan);
     const universe = await getAllowedUniverseForClient(client);
+    const importedProducts = await getImportedProductsForClient(client.id);
 
     const { data: activeRows, error: activeErr } = await supabase
       .from("facelens_sku_urls")
@@ -248,12 +289,23 @@ export async function GET(req: NextRequest) {
       urlByLensId.set(lensId, normalizeUrl(row.product_url));
     }
 
-    const rows = universe.map((row) => {
+    const importedBySku = new Map<string, any>();
+    for (const item of importedProducts || []) {
+      const sku = normalizeSku(item.sku);
+      if (!sku) continue;
+      importedBySku.set(sku, item);
+    }
+
+    const baseRows = universe.map((row) => {
       const active = activeBySku.get(row.sku);
+      const imported = importedBySku.get(row.sku);
       const url =
         active?.product_url ||
         urlByLensId.get(row.lens_id) ||
+        normalizeUrl(imported?.external_product_url) ||
         "";
+
+      const hasImportedImage = !!cleanStr(imported?.external_image_url);
 
       return {
         sku: row.sku,
@@ -269,8 +321,63 @@ export async function GET(req: NextRequest) {
         try_on_url: `https://facelens-live.vercel.app/?slug=${encodeURIComponent(
           String(client.slug || "")
         )}&sku=${encodeURIComponent(row.sku)}`,
+
+        origin: cleanStr(imported?.origin) || "manual",
+        asset_status:
+          cleanStr(imported?.asset_status) ||
+          (hasImportedImage ? "fallback" : "ready"),
+        image_source:
+          cleanStr(imported?.image_source) ||
+          (hasImportedImage ? "shopify_image" : "facelens_assets"),
+        external_image_url: cleanStr(imported?.external_image_url) || null,
+        external_product_url: cleanStr(imported?.external_product_url) || null,
+        external_product_id: cleanStr(imported?.external_product_id) || null,
+        external_variant_id: cleanStr(imported?.external_variant_id) || null,
+        last_sync_at: cleanStr(imported?.last_sync_at) || null,
       };
     });
+
+    const knownSkus = new Set(baseRows.map((r) => normalizeSku(r.sku)));
+
+    const importedOnlyRows = (importedProducts || [])
+      .filter((item: any) => {
+        const sku = normalizeSku(item.sku);
+        return sku && !knownSkus.has(sku);
+      })
+      .map((item: any) => {
+        const sku = normalizeSku(item.sku);
+        const active = activeBySku.get(sku);
+        const url = active?.product_url || normalizeUrl(item.external_product_url) || "";
+
+        return {
+          sku,
+          rb: "",
+          nombre: cleanStr(item.titulo) || sku,
+          categoria: cleanStr(item.categoria) || "",
+          proveedor: "",
+          grupo: "",
+          catalogos: [],
+          lens_id: "",
+          is_active: !!active?.is_active,
+          url,
+          try_on_url: `https://facelens-live.vercel.app/?slug=${encodeURIComponent(
+            String(client.slug || "")
+          )}&sku=${encodeURIComponent(sku)}`,
+
+          origin: cleanStr(item.origin) || "shopify",
+          asset_status: cleanStr(item.asset_status) || (cleanStr(item.external_image_url) ? "fallback" : "missing"),
+          image_source: cleanStr(item.image_source) || (cleanStr(item.external_image_url) ? "shopify_image" : "none"),
+          external_image_url: cleanStr(item.external_image_url) || null,
+          external_product_url: cleanStr(item.external_product_url) || null,
+          external_product_id: cleanStr(item.external_product_id) || null,
+          external_variant_id: cleanStr(item.external_variant_id) || null,
+          last_sync_at: cleanStr(item.last_sync_at) || null,
+        };
+      });
+
+    const rows = [...baseRows, ...importedOnlyRows].sort((a, b) =>
+      String(a.sku || "").localeCompare(String(b.sku || ""), "es")
+    );
 
     const activeCount = rows.filter((r) => r.is_active).length;
     const urlCount = rows.filter((r) => normalizeUrl(r.url)).length;
@@ -370,11 +477,16 @@ export async function POST(req: NextRequest) {
 
     const rows = Array.from(deduped.values());
 
+    const importedProducts = await getImportedProductsForClient(client.id);
+    const importedSkuSet = new Set(
+      (importedProducts || []).map((item: any) => normalizeSku(item.sku)).filter(Boolean)
+    );
+
     const notAllowed: Array<{ sku: string; reason: string }> = [];
     const allowedRows: SaveRow[] = [];
 
     for (const row of rows) {
-      if (!universeBySku.has(row.sku)) {
+      if (!universeBySku.has(row.sku) && !importedSkuSet.has(row.sku)) {
         notAllowed.push({
           sku: row.sku,
           reason: "sku_not_allowed_for_client",
@@ -447,6 +559,7 @@ export async function POST(req: NextRequest) {
 
     const urlUpserts = allowedRows
       .filter((r) => normalizeUrl(r.url))
+      .filter((r) => universeBySku.has(r.sku))
       .map((r) => {
         const universeRow = universeBySku.get(r.sku);
         return {

@@ -33,6 +33,15 @@ type SkuRow = {
   is_active: boolean;
   url: string;
   try_on_url: string;
+
+  origin?: string | null;
+  asset_status?: string | null;
+  image_source?: string | null;
+  external_image_url?: string | null;
+  external_product_url?: string | null;
+  external_product_id?: string | null;
+  external_variant_id?: string | null;
+  last_sync_at?: string | null;
 };
 
 type DraftRow = {
@@ -40,11 +49,19 @@ type DraftRow = {
   url?: string;
 };
 
+type OriginFilter = "all" | "manual" | "shopify" | "tiendanube";
+type AssetStatusFilter = "all" | "ready" | "fallback" | "missing";
+type ImageSourceFilter = "all" | "facelens_assets" | "shopify_image" | "none";
+
 function normSku(v: any) {
   return String(v ?? "").trim().toUpperCase();
 }
 
 function normUrl(v: any) {
+  return String(v ?? "").trim();
+}
+
+function cleanStr(v: any) {
   return String(v ?? "").trim();
 }
 
@@ -58,6 +75,53 @@ function safeFilePart(v: any) {
     .replace(/[\\/:*?"<>|]+/g, "-")
     .replace(/\s+/g, "_")
     .replace(/_+/g, "_");
+}
+
+function getOriginLabel(value?: string | null) {
+  const v = cleanStr(value).toLowerCase();
+  if (v === "shopify") return "shopify";
+  if (v === "tiendanube") return "tiendanube";
+  return "manual";
+}
+
+function getAssetStatusValue(row: SkuRow) {
+  const explicit = cleanStr(row.asset_status).toLowerCase();
+  if (explicit === "ready" || explicit === "fallback" || explicit === "missing") return explicit;
+
+  const imageSource = cleanStr(row.image_source).toLowerCase();
+  const hasExternalImage = !!cleanStr(row.external_image_url);
+
+  if (imageSource === "facelens_assets") return "ready";
+  if (imageSource === "shopify_image" || hasExternalImage) return "fallback";
+  return "missing";
+}
+
+function getAssetStatusLabel(row: SkuRow) {
+  const status = getAssetStatusValue(row);
+  if (status === "ready") return "Listo para probar";
+  if (status === "fallback") return "Imagen temporal";
+  return "Falta asset";
+}
+
+function getImageSourceValue(row: SkuRow) {
+  const explicit = cleanStr(row.image_source).toLowerCase();
+  if (
+    explicit === "facelens_assets" ||
+    explicit === "shopify_image" ||
+    explicit === "none"
+  ) {
+    return explicit;
+  }
+
+  const hasExternalImage = !!cleanStr(row.external_image_url);
+  return hasExternalImage ? "shopify_image" : "none";
+}
+
+function getImageSourceLabel(row: SkuRow) {
+  const source = getImageSourceValue(row);
+  if (source === "facelens_assets") return "Assets FaceLens";
+  if (source === "shopify_image") return "Imagen Shopify";
+  return "Sin imagen";
 }
 
 const styles = {
@@ -259,6 +323,45 @@ const styles = {
     fontSize: 12,
     fontWeight: 700,
   } as React.CSSProperties,
+
+  badgeReady: {
+    display: "inline-block",
+    padding: "4px 8px",
+    borderRadius: 999,
+    background: "#ecfdf5",
+    color: "#065f46",
+    fontSize: 12,
+    fontWeight: 700,
+  } as React.CSSProperties,
+
+  badgeFallback: {
+    display: "inline-block",
+    padding: "4px 8px",
+    borderRadius: 999,
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    fontSize: 12,
+    fontWeight: 700,
+  } as React.CSSProperties,
+
+  badgeMissing: {
+    display: "inline-block",
+    padding: "4px 8px",
+    borderRadius: 999,
+    background: "#fef2f2",
+    color: "#991b1b",
+    fontSize: 12,
+    fontWeight: 700,
+  } as React.CSSProperties,
+
+  imageThumb: {
+    width: 52,
+    height: 52,
+    objectFit: "cover" as const,
+    borderRadius: 10,
+    border: "1px solid #e5e7eb",
+    background: "#f9fafb",
+  } as React.CSSProperties,
 };
 
 export default function SkuUrlsPage() {
@@ -284,6 +387,9 @@ export default function SkuUrlsPage() {
   const [filterActive, setFilterActive] = useState<"all" | "active" | "inactive">("all");
   const [filterCategory, setFilterCategory] = useState("all");
   const [filterCatalog, setFilterCatalog] = useState("all");
+  const [filterOrigin, setFilterOrigin] = useState<OriginFilter>("all");
+  const [filterAssetStatus, setFilterAssetStatus] = useState<AssetStatusFilter>("all");
+  const [filterImageSource, setFilterImageSource] = useState<ImageSourceFilter>("all");
 
   const [copiedKey, setCopiedKey] = useState("");
 
@@ -402,6 +508,10 @@ export default function SkuUrlsPage() {
       const nombre = String(row.nombre || "").toLowerCase();
       const categoria = String(row.categoria || "").toLowerCase();
       const cats = (row.catalogos || []).join(" ").toLowerCase();
+      const externalProductUrl = cleanStr(row.external_product_url).toLowerCase();
+      const origin = getOriginLabel(row.origin);
+      const assetStatus = getAssetStatusValue(row);
+      const imageSource = getImageSourceValue(row);
 
       const matchesSearch =
         !q ||
@@ -410,7 +520,8 @@ export default function SkuUrlsPage() {
         nombre.includes(q) ||
         categoria.includes(q) ||
         cats.includes(q) ||
-        url.includes(q);
+        url.includes(q) ||
+        externalProductUrl.includes(q);
 
       const matchesActive =
         filterActive === "all" ||
@@ -423,9 +534,36 @@ export default function SkuUrlsPage() {
       const matchesCatalog =
         filterCatalog === "all" || (row.catalogos || []).includes(filterCatalog);
 
-      return matchesSearch && matchesActive && matchesCategory && matchesCatalog;
+      const matchesOrigin =
+        filterOrigin === "all" || origin === filterOrigin;
+
+      const matchesAssetStatus =
+        filterAssetStatus === "all" || assetStatus === filterAssetStatus;
+
+      const matchesImageSource =
+        filterImageSource === "all" || imageSource === filterImageSource;
+
+      return (
+        matchesSearch &&
+        matchesActive &&
+        matchesCategory &&
+        matchesCatalog &&
+        matchesOrigin &&
+        matchesAssetStatus &&
+        matchesImageSource
+      );
     });
-  }, [rows, draft, search, filterActive, filterCategory, filterCatalog]);
+  }, [
+    rows,
+    draft,
+    search,
+    filterActive,
+    filterCategory,
+    filterCatalog,
+    filterOrigin,
+    filterAssetStatus,
+    filterImageSource,
+  ]);
 
   const rowsWithDraft = useMemo(() => {
     return rows.map((row) => ({
@@ -598,6 +736,10 @@ export default function SkuUrlsPage() {
           mmodelo: String(row.nombre || "").trim(),
           url_producto: currentUrl,
           url_probador: tryOnUrl,
+          origen: getOriginLabel(row.origin),
+          visual: getImageSourceLabel(row),
+          estado: getAssetStatusLabel(row),
+          imagen_importada: cleanStr(row.external_image_url),
         };
       });
 
@@ -830,12 +972,48 @@ export default function SkuUrlsPage() {
             ))}
           </select>
 
+          <select
+            value={filterOrigin}
+            onChange={(e) => setFilterOrigin(e.target.value as OriginFilter)}
+            style={{ ...styles.select, minWidth: 180 }}
+          >
+            <option value="all">Todos los orígenes</option>
+            <option value="manual">Manual</option>
+            <option value="shopify">Shopify</option>
+            <option value="tiendanube">Tiendanube</option>
+          </select>
+
+          <select
+            value={filterAssetStatus}
+            onChange={(e) => setFilterAssetStatus(e.target.value as AssetStatusFilter)}
+            style={{ ...styles.select, minWidth: 180 }}
+          >
+            <option value="all">Todos los estados</option>
+            <option value="ready">Listos</option>
+            <option value="fallback">Imagen temporal</option>
+            <option value="missing">Falta asset</option>
+          </select>
+
+          <select
+            value={filterImageSource}
+            onChange={(e) => setFilterImageSource(e.target.value as ImageSourceFilter)}
+            style={{ ...styles.select, minWidth: 190 }}
+          >
+            <option value="all">Todos los visuales</option>
+            <option value="facelens_assets">Assets FaceLens</option>
+            <option value="shopify_image">Imagen Shopify</option>
+            <option value="none">Sin imagen</option>
+          </select>
+
           <button
             onClick={() => {
               setSearch("");
               setFilterActive("all");
               setFilterCategory("all");
               setFilterCatalog("all");
+              setFilterOrigin("all");
+              setFilterAssetStatus("all");
+              setFilterImageSource("all");
             }}
             style={styles.buttonSecondary}
           >
@@ -862,6 +1040,10 @@ export default function SkuUrlsPage() {
                   "modelo",
                   "categoría",
                   "catálogos",
+                  "origen",
+                  "visual",
+                  "estado",
+                  "imagen",
                   "url_producto",
                   "url_probador",
                   "acciones",
@@ -879,6 +1061,12 @@ export default function SkuUrlsPage() {
                 const currentUrl = normUrl(getValue(row, "url"));
                 const tryOnUrl = row.try_on_url || "";
                 const deepLinkAllowed = isPrimePlan(selectedClient?.plan);
+                const originLabel = getOriginLabel(row.origin);
+                const imageSourceLabel = getImageSourceLabel(row);
+                const assetStatusLabel = getAssetStatusLabel(row);
+                const assetStatusValue = getAssetStatusValue(row);
+                const externalImageUrl = cleanStr(row.external_image_url);
+                const externalProductUrl = cleanStr(row.external_product_url);
 
                 return (
                   <tr key={row.sku}>
@@ -914,12 +1102,57 @@ export default function SkuUrlsPage() {
                     </td>
 
                     <td style={styles.td}>
-                      <input
-                        value={currentUrl}
-                        onChange={(e) => setField(row.sku, "url", e.target.value)}
-                        placeholder="https://..."
-                        style={styles.inputSmall}
-                      />
+                      <span style={styles.chip}>{originLabel}</span>
+                    </td>
+
+                    <td style={styles.td}>
+                      <span style={styles.chip}>{imageSourceLabel}</span>
+                    </td>
+
+                    <td style={styles.td}>
+                      <span
+                        style={
+                          assetStatusValue === "ready"
+                            ? styles.badgeReady
+                            : assetStatusValue === "fallback"
+                            ? styles.badgeFallback
+                            : styles.badgeMissing
+                        }
+                      >
+                        {assetStatusLabel}
+                      </span>
+                    </td>
+
+                    <td style={styles.td}>
+                      {externalImageUrl ? (
+                        <a href={externalImageUrl} target="_blank" rel="noreferrer" title={externalImageUrl}>
+                          <img src={externalImageUrl} alt={row.nombre || row.sku} style={styles.imageThumb} />
+                        </a>
+                      ) : (
+                        <span style={styles.muted}>Sin imagen</span>
+                      )}
+                    </td>
+
+                    <td style={styles.td}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <input
+                          value={currentUrl}
+                          onChange={(e) => setField(row.sku, "url", e.target.value)}
+                          placeholder="https://..."
+                          style={styles.inputSmall}
+                        />
+                        {externalProductUrl ? (
+                          <a
+                            href={externalProductUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={externalProductUrl}
+                            style={styles.urlBox}
+                          >
+                            Link importado
+                          </a>
+                        ) : null}
+                      </div>
                     </td>
 
                     <td style={styles.td}>
@@ -983,7 +1216,7 @@ export default function SkuUrlsPage() {
 
               {filteredRows.length === 0 && (
                 <tr>
-                  <td colSpan={9} style={{ ...styles.td, color: "#6b7280" }}>
+                  <td colSpan={13} style={{ ...styles.td, color: "#6b7280" }}>
                     No hay SKUs para mostrar con el filtro actual.
                   </td>
                 </tr>
