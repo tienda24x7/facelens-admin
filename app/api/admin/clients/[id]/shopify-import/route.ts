@@ -201,7 +201,14 @@ export async function POST(
       );
     }
 
-    const client = data as ClientRow;
+    if (typeof data !== "object" || Array.isArray(data)) {
+      return NextResponse.json(
+        { ok: false, error: "Respuesta inválida del cliente" },
+        { status: 500 }
+      );
+    }
+
+    const client = data as unknown as ClientRow;
 
     const storePlatform = cleanStr(client.store_platform || "none").toLowerCase();
     const authMode = cleanStr(client.shopify_auth_mode || "token").toLowerCase();
