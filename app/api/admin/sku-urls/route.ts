@@ -19,6 +19,49 @@ type PlanLimits = {
   max_urls: number | null;
 };
 
+type ClientRow = {
+  id: string;
+  slug: string | null;
+  nombre: string | null;
+  plan: string | null;
+  catalog_scope: string | null;
+  catalog_slug: string | null;
+};
+
+type ImportedProductRow = {
+  cliente_id: string;
+  sku: string;
+  titulo: string | null;
+  categoria: string | null;
+  origin: string | null;
+  external_image_url: string | null;
+  external_product_url: string | null;
+  external_product_id: string | null;
+  external_variant_id: string | null;
+  image_source: string | null;
+  asset_status: string | null;
+  last_sync_at: string | null;
+  facelens_sku: string | null;
+  preview_review_status: string | null;
+  preview_resolution: string | null;
+  imported_preview_approved: boolean | null;
+  approved_image_url: string | null;
+  live_visual_mode: string | null;
+  live_enabled: boolean | null;
+};
+
+type AllowedUniverseRow = {
+  lens_id: string;
+  sku: string;
+  rb: string;
+  nombre: string;
+  categoria: string;
+  proveedor: string;
+  grupo: string;
+  activo_base: boolean;
+  catalogos: string[];
+};
+
 function normalizeSku(value: any) {
   return String(value || "").trim().toUpperCase();
 }
@@ -118,7 +161,7 @@ function sortRowsForUi(rows: any[]) {
 }
 
 function buildVisualMeta(params: {
-  imported?: any;
+  imported?: ImportedProductRow | null;
   importedOnly: boolean;
   hasNativeBase: boolean;
 }) {
@@ -255,7 +298,7 @@ async function getPlanLimits(planCode: string | null | undefined): Promise<PlanL
   };
 }
 
-async function getClientOrThrow(client_id: string) {
+async function getClientOrThrow(client_id: string): Promise<ClientRow> {
   const { data, error } = await supabase
     .from("clientes facelens")
     .select("id, slug, nombre, plan, catalog_scope, catalog_slug")
@@ -266,10 +309,14 @@ async function getClientOrThrow(client_id: string) {
     throw new Error(`Cliente no encontrado: ${error?.message || client_id}`);
   }
 
-  return data;
+  if (typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("Respuesta inválida del cliente");
+  }
+
+  return data as unknown as ClientRow;
 }
 
-async function getAllowedUniverseForClient(client: any) {
+async function getAllowedUniverseForClient(client: ClientRow): Promise<AllowedUniverseRow[]> {
   const scope = normalizeCatalog(client.catalog_scope || "ALL");
 
   const catalogFilter = scope === "ALL" ? ["NICOLAS", "EZEQUIEL"] : [scope];
@@ -336,17 +383,7 @@ async function getAllowedUniverseForClient(client: any) {
     if (sku) importBySku.set(sku, row);
   }
 
-  const out: Array<{
-    lens_id: string;
-    sku: string;
-    rb: string;
-    nombre: string;
-    categoria: string;
-    proveedor: string;
-    grupo: string;
-    activo_base: boolean;
-    catalogos: string[];
-  }> = [];
+  const out: AllowedUniverseRow[] = [];
 
   for (const lensId of lensIds) {
     const sku = skuByLensId.get(lensId);
@@ -373,7 +410,9 @@ async function getAllowedUniverseForClient(client: any) {
   return out;
 }
 
-async function getImportedProductsForClient(clientId: string) {
+async function getImportedProductsForClient(
+  clientId: string
+): Promise<ImportedProductRow[]> {
   try {
     const { data, error } = await supabase
       .from(IMPORTED_PRODUCTS_TABLE)
@@ -407,7 +446,11 @@ async function getImportedProductsForClient(clientId: string) {
       return [];
     }
 
-    return data || [];
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data as unknown as ImportedProductRow[];
   } catch (e) {
     console.warn("Error leyendo productos importados:", e);
     return [];
@@ -469,8 +512,8 @@ export async function GET(req: NextRequest) {
       urlByLensId.set(lensId, normalizeUrl(row.product_url));
     }
 
-    const importedBySku = new Map<string, any>();
-    for (const item of importedProducts || []) {
+    const importedBySku = new Map<string, ImportedProductRow>();
+    for (const item of importedProducts) {
       const sku = normalizeSku(item.sku);
       if (!sku) continue;
       importedBySku.set(sku, item);
@@ -535,12 +578,12 @@ export async function GET(req: NextRequest) {
 
     const knownSkus = new Set(baseRows.map((r) => normalizeSku(r.sku)));
 
-    const importedOnlyRows = (importedProducts || [])
-      .filter((item: any) => {
+    const importedOnlyRows = importedProducts
+      .filter((item) => {
         const sku = normalizeSku(item.sku);
         return sku && !knownSkus.has(sku);
       })
-      .map((item: any) => {
+      .map((item) => {
         const sku = normalizeSku(item.sku);
         const active = activeBySku.get(sku);
         const url = active?.product_url || normalizeUrl(item.external_product_url) || "";
@@ -652,7 +695,7 @@ export async function POST(req: NextRequest) {
     const plan = await getPlanLimits(client.plan);
     const universe = await getAllowedUniverseForClient(client);
 
-    const universeBySku = new Map<string, any>();
+    const universeBySku = new Map<string, AllowedUniverseRow>();
     for (const row of universe) {
       universeBySku.set(normalizeSku(row.sku), row);
     }
@@ -694,7 +737,7 @@ export async function POST(req: NextRequest) {
 
     const importedProducts = await getImportedProductsForClient(client.id);
     const importedSkuSet = new Set(
-      (importedProducts || []).map((item: any) => normalizeSku(item.sku)).filter(Boolean)
+      importedProducts.map((item) => normalizeSku(item.sku)).filter(Boolean)
     );
 
     const notAllowed: Array<{ sku: string; reason: string }> = [];
@@ -776,7 +819,7 @@ export async function POST(req: NextRequest) {
       .filter((r) => normalizeUrl(r.url))
       .filter((r) => universeBySku.has(r.sku))
       .map((r) => {
-        const universeRow = universeBySku.get(r.sku);
+        const universeRow = universeBySku.get(r.sku)!;
         return {
           cliente_id: client.id,
           lente_id: universeRow.lens_id,
