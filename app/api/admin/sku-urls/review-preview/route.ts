@@ -10,6 +10,29 @@ const IMPORTED_PRODUCTS_TABLE = "clientes_imported_products";
 
 type ReviewAction = "approve" | "reject" | "needs_asset";
 
+type ClientRow = {
+  id: string;
+  slug: string | null;
+  nombre: string | null;
+};
+
+type ImportedProductRow = {
+  cliente_id: string;
+  sku: string;
+  titulo: string | null;
+  origin: string | null;
+  external_image_url: string | null;
+  external_product_url: string | null;
+  external_product_id: string | null;
+  external_variant_id: string | null;
+  facelens_sku: string | null;
+  preview_review_status: string | null;
+  imported_preview_approved: boolean | null;
+  approved_image_url: string | null;
+  live_visual_mode: string | null;
+  live_enabled: boolean | null;
+};
+
 function normalizeSku(value: any) {
   return String(value || "").trim().toUpperCase();
 }
@@ -24,7 +47,7 @@ function normalizeAction(value: any): ReviewAction | null {
   return null;
 }
 
-async function getClientOrThrow(client_id: string) {
+async function getClientOrThrow(client_id: string): Promise<ClientRow> {
   const { data, error } = await supabase
     .from("clientes facelens")
     .select("id, slug, nombre")
@@ -35,10 +58,17 @@ async function getClientOrThrow(client_id: string) {
     throw new Error(`Cliente no encontrado: ${error?.message || client_id}`);
   }
 
-  return data;
+  if (typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("Respuesta inválida del cliente");
+  }
+
+  return data as unknown as ClientRow;
 }
 
-async function getImportedProductOrThrow(clientId: string, sku: string) {
+async function getImportedProductOrThrow(
+  clientId: string,
+  sku: string
+): Promise<ImportedProductRow> {
   const { data, error } = await supabase
     .from(IMPORTED_PRODUCTS_TABLE)
     .select(
@@ -53,7 +83,6 @@ async function getImportedProductOrThrow(clientId: string, sku: string) {
         "external_variant_id",
         "facelens_sku",
         "preview_review_status",
-        "preview_resolution",
         "imported_preview_approved",
         "approved_image_url",
         "live_visual_mode",
@@ -72,7 +101,11 @@ async function getImportedProductOrThrow(clientId: string, sku: string) {
     throw new Error(`No se encontró producto importado para SKU ${sku}`);
   }
 
-  return data;
+  if (typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("Respuesta inválida del producto importado");
+  }
+
+  return data as unknown as ImportedProductRow;
 }
 
 export async function POST(req: NextRequest) {
@@ -118,7 +151,6 @@ export async function POST(req: NextRequest) {
     if (action === "approve") {
       patch = {
         preview_review_status: "approved",
-        preview_resolution: "approved",
         imported_preview_approved: true,
         approved_image_url: externalImageUrl,
         live_visual_mode: "imported_preview",
@@ -129,7 +161,6 @@ export async function POST(req: NextRequest) {
     if (action === "reject") {
       patch = {
         preview_review_status: "rejected",
-        preview_resolution: "rejected",
         imported_preview_approved: false,
         approved_image_url: null,
         live_visual_mode: "disabled",
@@ -140,7 +171,6 @@ export async function POST(req: NextRequest) {
     if (action === "needs_asset") {
       patch = {
         preview_review_status: "rejected",
-        preview_resolution: "needs_asset",
         imported_preview_approved: false,
         approved_image_url: null,
         live_visual_mode: "disabled",
@@ -160,7 +190,6 @@ export async function POST(req: NextRequest) {
           "titulo",
           "facelens_sku",
           "preview_review_status",
-          "preview_resolution",
           "imported_preview_approved",
           "approved_image_url",
           "live_visual_mode",
