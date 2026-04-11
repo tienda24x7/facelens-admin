@@ -343,6 +343,7 @@ export default function ClientsPage() {
   const [archivingId, setArchivingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [testingStoreId, setTestingStoreId] = useState<string | null>(null);
+  const [importingStoreId, setImportingStoreId] = useState<string | null>(null);
 
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [logoFileById, setLogoFileById] = useState<Record<string, File | null>>({});
@@ -482,20 +483,59 @@ export default function ClientsPage() {
   }
 
   async function testShopifyConnection(row: ClientRow) {
-    try {
-      const authMode = cleanStr(row.shopify_auth_mode || "token");
+  try {
+    setTestingStoreId(row.id);
+    setErr(null);
+    setInfo(null);
 
-      if (authMode === "app_credentials") {
-        setErr(null);
-        setInfo("ℹ️ El test para Shopify con client id / client secret queda pendiente del backend OAuth.");
-        return;
+    const response = await fetch(`/api/admin/clients/${row.id}/shopify-test`, {
+      method: "POST",
+    });
+
+    const json = await response.json().catch(() => ({}));
+
+    if (!response.ok || !json?.ok) {
+      throw new Error(
+        json?.detail ||
+          json?.error ||
+          "No se pudo probar la conexión Shopify."
+      );
+    }
+
+    const productsFound = Number(json?.sample?.products_found || 0);
+    const domain = cleanStr(json?.shop?.domain);
+    const firstTitles = Array.isArray(json?.sample?.first_products)
+      ? json.sample.first_products
+          .map((p: any) => cleanStr(p?.title))
+          .filter(Boolean)
+          .slice(0, 3)
+      : [];
+
+    const preview =
+      firstTitles.length > 0 ? ` • Ejemplos: ${firstTitles.join(" | ")}` : "";
+
+    setInfo(
+      `✅ Conexión Shopify OK para ${cleanStr(row.nombre || row.slug || row.id)} • Dominio: ${domain || "—"} • Productos muestra: ${productsFound}${preview}`
+    );
+  } catch (e: any) {
+    setErr(e?.message || "No se pudo probar la conexión Shopify.");
+  } finally {
+    setTestingStoreId(null);
+  }
+}
+
+  async function importShopifyProducts(row: ClientRow) {
+    try {
+      const storePlatform = cleanStr(row.store_platform).toLowerCase();
+      if (storePlatform !== "shopify") {
+        throw new Error("El cliente no tiene Shopify configurado como plataforma.");
       }
 
-      setTestingStoreId(row.id);
+      setImportingStoreId(row.id);
       setErr(null);
       setInfo(null);
 
-      const response = await fetch(`/api/admin/clients/${row.id}/shopify-test`, {
+      const response = await fetch(`/api/admin/clients/${row.id}/shopify-import`, {
         method: "POST",
       });
 
@@ -505,29 +545,23 @@ export default function ClientsPage() {
         throw new Error(
           json?.error ||
             json?.detail ||
-            "No se pudo probar la conexión Shopify."
+            "No se pudo importar productos desde Shopify."
         );
       }
 
-      const productsFound = Number(json?.sample?.products_found || 0);
-      const domain = cleanStr(json?.shop?.domain);
-      const firstTitles = Array.isArray(json?.sample?.first_products)
-        ? json.sample.first_products
-            .map((p: any) => cleanStr(p?.title))
-            .filter(Boolean)
-            .slice(0, 3)
-        : [];
-
-      const preview =
-        firstTitles.length > 0 ? ` • Ejemplos: ${firstTitles.join(" | ")}` : "";
+      const importedCount = Number(json?.imported_count || 0);
+      const productsFound = Number(json?.products_found || 0);
+      const productsFiltered = Number(json?.products_filtered || 0);
 
       setInfo(
-        `✅ Conexión Shopify OK para ${cleanStr(row.nombre || row.slug || row.id)} • Dominio: ${domain || "—"} • Productos muestra: ${productsFound}${preview}`
+        `✅ Importación Shopify OK para ${cleanStr(row.nombre || row.slug || row.id)} • Productos leídos: ${productsFound} • Filtrados: ${productsFiltered} • Guardados: ${importedCount}`
       );
+
+      await load();
     } catch (e: any) {
-      setErr(e?.message || "No se pudo probar la conexión Shopify.");
+      setErr(e?.message || "No se pudo importar productos desde Shopify.");
     } finally {
-      setTestingStoreId(null);
+      setImportingStoreId(null);
     }
   }
 
@@ -1347,15 +1381,17 @@ export default function ClientsPage() {
                 const isBusy =
                   savingId === r.id ||
                   archivingId === r.id ||
-                  testingStoreId === r.id;
+                  testingStoreId === r.id ||
+                  importingStoreId === r.id;
                 const isExpanded = expandedId === r.id;
 
                 const currentPrimary = normalizeHexColor(getValue(r, "color_primario"), "#111111");
                 const currentSecondary = normalizeHexColor(getValue(r, "olor_secundario"), "#0F0F0F");
+                const currentStorePlatform = cleanStr(getValue(r, "store_platform")).toLowerCase();
 
                 return (
-                  <React.Fragment key={r.id}>
-                    <tr>
+                  <>
+                    <tr key={r.id}>
                       <td style={styles.td}>
                         <div style={{ fontWeight: 700 }}>{getValue(r, "nombre") || "—"}</div>
                         <div style={{ ...styles.muted, fontSize: 12, marginTop: 4, fontFamily: "monospace" }}>
@@ -1456,7 +1492,7 @@ export default function ClientsPage() {
                     </tr>
 
                     {isExpanded ? (
-                      <tr>
+                      <tr key={`${r.id}-detail`}>
                         <td colSpan={7} style={styles.td}>
                           <div style={styles.detailCard}>
                             <div style={styles.detailGrid}>
@@ -1803,19 +1839,18 @@ export default function ClientsPage() {
                                     })}
                                     disabled={
                                       testingStoreId === r.id ||
-                                      cleanStr(getValue(r, "store_platform")).toLowerCase() !== "shopify"
+                                      currentStorePlatform !== "shopify"
                                     }
                                     style={{
                                       ...styles.buttonSecondary,
                                       opacity:
-                                        testingStoreId === r.id ||
-                                        cleanStr(getValue(r, "store_platform")).toLowerCase() !== "shopify"
+                                        testingStoreId === r.id || currentStorePlatform !== "shopify"
                                           ? 0.6
                                           : 1,
                                       cursor:
                                         testingStoreId === r.id
                                           ? "wait"
-                                          : cleanStr(getValue(r, "store_platform")).toLowerCase() !== "shopify"
+                                          : currentStorePlatform !== "shopify"
                                           ? "not-allowed"
                                           : "pointer",
                                     }}
@@ -1824,11 +1859,31 @@ export default function ClientsPage() {
                                   </button>
 
                                   <button
-                                    onClick={() => showPendingStoreAction(`Importar productos de ${cleanStr(getValue(r, "nombre") || getValue(r, "slug") || r.id)}`)}
-                                    disabled
-                                    style={{ ...styles.buttonSecondary, opacity: 0.6, cursor: "not-allowed" }}
+                                    onClick={() =>
+                                      importShopifyProducts({
+                                        ...r,
+                                        ...(draft[r.id] || {}),
+                                      })
+                                    }
+                                    disabled={
+                                      importingStoreId === r.id ||
+                                      currentStorePlatform !== "shopify"
+                                    }
+                                    style={{
+                                      ...styles.buttonSecondary,
+                                      opacity:
+                                        importingStoreId === r.id || currentStorePlatform !== "shopify"
+                                          ? 0.6
+                                          : 1,
+                                      cursor:
+                                        importingStoreId === r.id
+                                          ? "wait"
+                                          : currentStorePlatform !== "shopify"
+                                          ? "not-allowed"
+                                          : "pointer",
+                                    }}
                                   >
-                                    Importar productos
+                                    {importingStoreId === r.id ? "Importando..." : "Importar productos"}
                                   </button>
 
                                   <button
@@ -1936,7 +1991,7 @@ export default function ClientsPage() {
                         </td>
                       </tr>
                     ) : null}
-                  </React.Fragment>
+                  </>
                 );
               })}
 

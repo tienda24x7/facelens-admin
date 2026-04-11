@@ -35,6 +35,28 @@ function cleanStr(value: any) {
   return String(value ?? "").trim();
 }
 
+function normalizeReviewStatus(value: any) {
+  const v = cleanStr(value).toLowerCase();
+  if (v === "approved" || v === "rejected") return v;
+  return "pending";
+}
+
+function normalizePreviewResolution(value: any) {
+  const v = cleanStr(value).toLowerCase();
+  if (v === "approved" || v === "rejected" || v === "needs_asset") return v;
+  return "pending";
+}
+
+function normalizeLiveVisualMode(value: any) {
+  const v = cleanStr(value).toLowerCase();
+  if (v === "native_asset" || v === "imported_preview") return v;
+  return "disabled";
+}
+
+function normalizeBool(value: any) {
+  return value === true;
+}
+
 function isValidUrl(value: string) {
   if (!value) return true;
   try {
@@ -43,6 +65,161 @@ function isValidUrl(value: string) {
   } catch {
     return false;
   }
+}
+
+function hasImportedOrigin(row: any) {
+  const origin = cleanStr(row?.origin).toLowerCase();
+  return origin !== "" && origin !== "manual";
+}
+
+function hasImportedImage(row: any) {
+  return !!cleanStr(row?.external_image_url);
+}
+
+function hasNativeAssetsByImportedRow(row: any) {
+  const assetStatus = cleanStr(row?.asset_status).toLowerCase();
+  const imageSource = cleanStr(row?.image_source).toLowerCase();
+  const liveVisualMode = normalizeLiveVisualMode(row?.live_visual_mode);
+
+  if (assetStatus === "ready") return true;
+  if (imageSource === "facelens_assets") return true;
+  if (liveVisualMode === "native_asset") return true;
+
+  return false;
+}
+
+function compareSkuLike(a: string, b: string) {
+  const an = Number(a);
+  const bn = Number(b);
+
+  const aIsNum = Number.isFinite(an) && String(an) === a;
+  const bIsNum = Number.isFinite(bn) && String(bn) === b;
+
+  if (aIsNum && bIsNum) return an - bn;
+  return a.localeCompare(b, "es");
+}
+
+function sortRowsForUi(rows: any[]) {
+  return [...rows].sort((a, b) => {
+    const aImported = hasImportedOrigin(a) ? 1 : 0;
+    const bImported = hasImportedOrigin(b) ? 1 : 0;
+    if (aImported !== bImported) return bImported - aImported;
+
+    const aHasUrl = normalizeUrl(a?.url) ? 1 : 0;
+    const bHasUrl = normalizeUrl(b?.url) ? 1 : 0;
+    if (aHasUrl !== bHasUrl) return bHasUrl - aHasUrl;
+
+    const aHasImg = hasImportedImage(a) ? 1 : 0;
+    const bHasImg = hasImportedImage(b) ? 1 : 0;
+    if (aHasImg !== bHasImg) return bHasImg - aHasImg;
+
+    return compareSkuLike(String(a?.sku || ""), String(b?.sku || ""));
+  });
+}
+
+function buildVisualMeta(params: {
+  imported?: any;
+  importedOnly: boolean;
+  hasNativeBase: boolean;
+}) {
+  const { imported, importedOnly, hasNativeBase } = params;
+
+  const importedOrigin = hasImportedOrigin(imported);
+  const hasImportedImg = !!cleanStr(imported?.external_image_url);
+  const approvedImageUrl = cleanStr(imported?.approved_image_url) || null;
+  const importedPreviewApproved = normalizeBool(imported?.imported_preview_approved);
+  const previewReviewStatus = normalizeReviewStatus(imported?.preview_review_status);
+  const previewResolution = normalizePreviewResolution(imported?.preview_resolution);
+  const liveVisualMode = normalizeLiveVisualMode(imported?.live_visual_mode);
+  const liveEnabled = normalizeBool(imported?.live_enabled);
+  const importedProductUrl = cleanStr(imported?.external_product_url) || null;
+  const nativeAssetsFromImported = hasNativeAssetsByImportedRow(imported);
+
+  const hasNativeAssets = importedOnly
+    ? nativeAssetsFromImported
+    : hasNativeBase && (nativeAssetsFromImported || !hasImportedImg);
+
+  const approvedFallbackReady =
+    liveEnabled &&
+    importedPreviewApproved &&
+    previewReviewStatus === "approved" &&
+    previewResolution === "approved" &&
+    liveVisualMode === "imported_preview" &&
+    !!approvedImageUrl;
+
+  let sourceType: "native" | "imported" | "merged" = "native";
+  if (importedOnly) {
+    sourceType = "imported";
+  } else if (importedOrigin) {
+    sourceType = "merged";
+  }
+
+  let imageUrlFinal: string | null = null;
+  if (hasNativeAssets) {
+    imageUrlFinal = approvedFallbackReady ? approvedImageUrl : null;
+  } else if (approvedFallbackReady) {
+    imageUrlFinal = approvedImageUrl;
+  } else if (hasImportedImg) {
+    imageUrlFinal = cleanStr(imported?.external_image_url);
+  }
+
+  let canRenderInLive = false;
+
+  if (hasNativeAssets) {
+    canRenderInLive = liveEnabled || !importedOrigin;
+  } else if (approvedFallbackReady) {
+    canRenderInLive = true;
+  } else {
+    canRenderInLive = false;
+  }
+
+  let visualStatus:
+    | "ready_native"
+    | "ready_merged"
+    | "fallback_imported_image"
+    | "imported_only"
+    | "missing_assets"
+    | "inactive_warning";
+
+  if (importedOnly) {
+    if (approvedFallbackReady) {
+      visualStatus = "fallback_imported_image";
+    } else if (previewResolution === "needs_asset") {
+      visualStatus = "missing_assets";
+    } else if (hasNativeAssets && canRenderInLive) {
+      visualStatus = "imported_only";
+    } else if (hasImportedImg && !canRenderInLive) {
+      visualStatus = "inactive_warning";
+    } else {
+      visualStatus = "missing_assets";
+    }
+  } else if (sourceType === "native") {
+    visualStatus = "ready_native";
+  } else if (hasNativeAssets && canRenderInLive) {
+    visualStatus = "ready_merged";
+  } else if (approvedFallbackReady) {
+    visualStatus = "fallback_imported_image";
+  } else if (previewResolution === "needs_asset") {
+    visualStatus = "missing_assets";
+  } else if (hasImportedImg && !canRenderInLive) {
+    visualStatus = "inactive_warning";
+  } else {
+    visualStatus = "missing_assets";
+  }
+
+  return {
+    source_type: sourceType,
+    is_imported_only: importedOnly,
+    has_native_assets: hasNativeAssets,
+    has_imported_image: hasImportedImg,
+    image_url_final: imageUrlFinal,
+    can_render_in_live: canRenderInLive,
+    visual_status: visualStatus,
+    imported_origin: importedOrigin ? cleanStr(imported?.origin) || null : null,
+    imported_product_url: importedProductUrl,
+    approved_fallback_ready: approvedFallbackReady,
+    preview_resolution: previewResolution,
+  };
 }
 
 async function getPlanLimits(planCode: string | null | undefined): Promise<PlanLimits> {
@@ -95,8 +272,7 @@ async function getClientOrThrow(client_id: string) {
 async function getAllowedUniverseForClient(client: any) {
   const scope = normalizeCatalog(client.catalog_scope || "ALL");
 
-  const catalogFilter =
-    scope === "ALL" ? ["NICOLAS", "EZEQUIEL"] : [scope];
+  const catalogFilter = scope === "ALL" ? ["NICOLAS", "EZEQUIEL"] : [scope];
 
   const { data: memberships, error: membershipsErr } = await supabase
     .from("lentes_catalogos")
@@ -215,6 +391,13 @@ async function getImportedProductsForClient(clientId: string) {
           "image_source",
           "asset_status",
           "last_sync_at",
+          "facelens_sku",
+          "preview_review_status",
+          "preview_resolution",
+          "imported_preview_approved",
+          "approved_image_url",
+          "live_visual_mode",
+          "live_enabled",
         ].join(",")
       )
       .eq("cliente_id", clientId);
@@ -256,10 +439,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const activeBySku = new Map<
-      string,
-      { is_active: boolean; product_url: string }
-    >();
+    const activeBySku = new Map<string, { is_active: boolean; product_url: string }>();
 
     for (const row of activeRows || []) {
       const sku = normalizeSku(row.sku);
@@ -305,7 +485,13 @@ export async function GET(req: NextRequest) {
         normalizeUrl(imported?.external_product_url) ||
         "";
 
-      const hasImportedImage = !!cleanStr(imported?.external_image_url);
+      const resolvedLiveSku = normalizeSku(imported?.facelens_sku) || row.sku;
+
+      const visualMeta = buildVisualMeta({
+        imported,
+        importedOnly: false,
+        hasNativeBase: true,
+      });
 
       return {
         sku: row.sku,
@@ -320,20 +506,30 @@ export async function GET(req: NextRequest) {
         url,
         try_on_url: `https://facelens-live.vercel.app/?slug=${encodeURIComponent(
           String(client.slug || "")
-        )}&sku=${encodeURIComponent(row.sku)}`,
+        )}&sku=${encodeURIComponent(resolvedLiveSku)}`,
+
+        facelens_sku: resolvedLiveSku,
+        preview_review_status: normalizeReviewStatus(imported?.preview_review_status),
+        preview_resolution: normalizePreviewResolution(imported?.preview_resolution),
+        imported_preview_approved: normalizeBool(imported?.imported_preview_approved),
+        approved_image_url: cleanStr(imported?.approved_image_url) || null,
+        live_visual_mode: normalizeLiveVisualMode(imported?.live_visual_mode),
+        live_enabled: normalizeBool(imported?.live_enabled),
 
         origin: cleanStr(imported?.origin) || "manual",
         asset_status:
           cleanStr(imported?.asset_status) ||
-          (hasImportedImage ? "fallback" : "ready"),
+          (visualMeta.has_imported_image ? "fallback" : "ready"),
         image_source:
           cleanStr(imported?.image_source) ||
-          (hasImportedImage ? "shopify_image" : "facelens_assets"),
+          (visualMeta.has_imported_image ? "shopify_image" : "facelens_assets"),
         external_image_url: cleanStr(imported?.external_image_url) || null,
         external_product_url: cleanStr(imported?.external_product_url) || null,
         external_product_id: cleanStr(imported?.external_product_id) || null,
         external_variant_id: cleanStr(imported?.external_variant_id) || null,
         last_sync_at: cleanStr(imported?.last_sync_at) || null,
+
+        ...visualMeta,
       };
     });
 
@@ -348,6 +544,13 @@ export async function GET(req: NextRequest) {
         const sku = normalizeSku(item.sku);
         const active = activeBySku.get(sku);
         const url = active?.product_url || normalizeUrl(item.external_product_url) || "";
+        const resolvedLiveSku = normalizeSku(item.facelens_sku) || sku;
+
+        const visualMeta = buildVisualMeta({
+          imported: item,
+          importedOnly: true,
+          hasNativeBase: false,
+        });
 
         return {
           sku,
@@ -362,22 +565,34 @@ export async function GET(req: NextRequest) {
           url,
           try_on_url: `https://facelens-live.vercel.app/?slug=${encodeURIComponent(
             String(client.slug || "")
-          )}&sku=${encodeURIComponent(sku)}`,
+          )}&sku=${encodeURIComponent(resolvedLiveSku)}`,
+
+          facelens_sku: resolvedLiveSku,
+          preview_review_status: normalizeReviewStatus(item.preview_review_status),
+          preview_resolution: normalizePreviewResolution(item.preview_resolution),
+          imported_preview_approved: normalizeBool(item.imported_preview_approved),
+          approved_image_url: cleanStr(item.approved_image_url) || null,
+          live_visual_mode: normalizeLiveVisualMode(item.live_visual_mode),
+          live_enabled: normalizeBool(item.live_enabled),
 
           origin: cleanStr(item.origin) || "shopify",
-          asset_status: cleanStr(item.asset_status) || (cleanStr(item.external_image_url) ? "fallback" : "missing"),
-          image_source: cleanStr(item.image_source) || (cleanStr(item.external_image_url) ? "shopify_image" : "none"),
+          asset_status:
+            cleanStr(item.asset_status) ||
+            (visualMeta.has_imported_image ? "fallback" : "missing"),
+          image_source:
+            cleanStr(item.image_source) ||
+            (visualMeta.has_imported_image ? "shopify_image" : "none"),
           external_image_url: cleanStr(item.external_image_url) || null,
           external_product_url: cleanStr(item.external_product_url) || null,
           external_product_id: cleanStr(item.external_product_id) || null,
           external_variant_id: cleanStr(item.external_variant_id) || null,
           last_sync_at: cleanStr(item.last_sync_at) || null,
+
+          ...visualMeta,
         };
       });
 
-    const rows = [...baseRows, ...importedOnlyRows].sort((a, b) =>
-      String(a.sku || "").localeCompare(String(b.sku || ""), "es")
-    );
+    const rows = sortRowsForUi([...baseRows, ...importedOnlyRows]);
 
     const activeCount = rows.filter((r) => r.is_active).length;
     const urlCount = rows.filter((r) => normalizeUrl(r.url)).length;

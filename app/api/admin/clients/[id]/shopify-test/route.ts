@@ -12,6 +12,66 @@ function cleanStr(v: any) {
   return String(v ?? "").trim();
 }
 
+async function getAdminAccessTokenWithClientCredentials(params: {
+  clientId: string;
+  clientSecret: string;
+  shopDomain: string;
+}) {
+  const clientId = cleanStr(params.clientId);
+  const clientSecret = cleanStr(params.clientSecret);
+  const shopDomain = cleanStr(params.shopDomain)
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/+$/, "");
+
+  if (!clientId) throw new Error("Falta clientId");
+  if (!clientSecret) throw new Error("Falta clientSecret");
+  if (!shopDomain) throw new Error("Falta shopDomain");
+
+  const tokenUrl = `https://${shopDomain}/admin/oauth/access_token`;
+
+  const body = new URLSearchParams();
+  body.set("grant_type", "client_credentials");
+  body.set("client_id", clientId);
+  body.set("client_secret", clientSecret);
+
+  const response = await fetch(tokenUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
+    },
+    cache: "no-store",
+    body: body.toString(),
+  });
+
+  const rawText = await response.text();
+  let parsed: any = null;
+
+  try {
+    parsed = rawText ? JSON.parse(rawText) : null;
+  } catch {
+    parsed = null;
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      parsed?.error_description ||
+        parsed?.error ||
+        parsed?.errors ||
+        rawText ||
+        `No se pudo obtener access token (HTTP ${response.status})`
+    );
+  }
+
+  const accessToken = cleanStr(parsed?.access_token);
+
+  if (!accessToken) {
+    throw new Error("Shopify no devolvió access_token.");
+  }
+
+  return accessToken;
+}
+
 export async function POST(
   _req: Request,
   ctx: { params: Promise<{ id: string }> }
@@ -63,6 +123,8 @@ export async function POST(
       .replace(/^https?:\/\//i, "")
       .replace(/\/+$/, "");
 
+    let token = "";
+
     if (authMode === "app_credentials") {
       const clientId = cleanStr(client.shopify_client_id);
       const clientSecret = cleanStr(client.shopify_client_secret);
@@ -81,28 +143,20 @@ export async function POST(
         );
       }
 
-      return NextResponse.json(
-        {
-          ok: false,
-          pending: true,
-          auth_mode: "app_credentials",
-          error: "El test para Shopify con client id / client secret todavía no está implementado.",
-          detail: "La configuración quedó guardada correctamente, pero falta desarrollar el flujo OAuth/token exchange para apps nuevas.",
-          shop: {
-            domain: normalizedDomain,
-          },
-        },
-        { status: 400 }
-      );
-    }
+      token = await getAdminAccessTokenWithClientCredentials({
+        clientId,
+        clientSecret,
+        shopDomain: normalizedDomain,
+      });
+    } else {
+      token = cleanStr(client.shopify_access_token);
 
-    const token = cleanStr(client.shopify_access_token);
-
-    if (!token) {
-      return NextResponse.json(
-        { ok: false, error: "Falta shopify_access_token en el cliente." },
-        { status: 400 }
-      );
+      if (!token) {
+        return NextResponse.json(
+          { ok: false, error: "Falta shopify_access_token en el cliente." },
+          { status: 400 }
+        );
+      }
     }
 
     const url = `https://${normalizedDomain}/admin/api/2025-01/products.json?limit=3`;
@@ -112,6 +166,7 @@ export async function POST(
       headers: {
         "X-Shopify-Access-Token": token,
         "Content-Type": "application/json",
+        Accept: "application/json",
       },
       cache: "no-store",
     });
@@ -129,7 +184,7 @@ export async function POST(
       return NextResponse.json(
         {
           ok: false,
-          auth_mode: "token",
+          auth_mode: authMode,
           error: "Shopify respondió con error.",
           detail:
             parsed?.errors ||
@@ -147,7 +202,7 @@ export async function POST(
     return NextResponse.json(
       {
         ok: true,
-        auth_mode: "token",
+        auth_mode: authMode,
         message: "Conexión Shopify OK",
         shop: {
           domain: normalizedDomain,
