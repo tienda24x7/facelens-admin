@@ -553,7 +553,6 @@ export async function GET(req: NextRequest) {
 
         facelens_sku: resolvedLiveSku,
         preview_review_status: normalizeReviewStatus(imported?.preview_review_status),
-        preview_resolution: normalizePreviewResolution(imported?.preview_resolution),
         imported_preview_approved: normalizeBool(imported?.imported_preview_approved),
         approved_image_url: cleanStr(imported?.approved_image_url) || null,
         live_visual_mode: normalizeLiveVisualMode(imported?.live_visual_mode),
@@ -612,7 +611,6 @@ export async function GET(req: NextRequest) {
 
           facelens_sku: resolvedLiveSku,
           preview_review_status: normalizeReviewStatus(item.preview_review_status),
-          preview_resolution: normalizePreviewResolution(item.preview_resolution),
           imported_preview_approved: normalizeBool(item.imported_preview_approved),
           approved_image_url: cleanStr(item.approved_image_url) || null,
           live_visual_mode: normalizeLiveVisualMode(item.live_visual_mode),
