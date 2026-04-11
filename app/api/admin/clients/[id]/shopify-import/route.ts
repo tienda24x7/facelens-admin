@@ -9,6 +9,21 @@ const supabase = createClient(
 const CLIENTS_TABLE = "clientes facelens";
 const IMPORTED_PRODUCTS_TABLE = "clientes_imported_products";
 
+type ClientRow = {
+  id: string;
+  nombre: string | null;
+  slug: string | null;
+  store_platform: string | null;
+  store_status: string | null;
+  shopify_store_domain: string | null;
+  shopify_access_token: string | null;
+  shopify_auth_mode: string | null;
+  shopify_client_id: string | null;
+  shopify_client_secret: string | null;
+  store_import_enabled: boolean | null;
+  store_import_filters: string | null;
+};
+
 function cleanStr(v: any) {
   return String(v ?? "").trim();
 }
@@ -158,7 +173,7 @@ export async function POST(
       );
     }
 
-    const { data: client, error: clientError } = await supabase
+    const { data, error: clientError } = await supabase
       .from(CLIENTS_TABLE)
       .select(
         [
@@ -179,12 +194,14 @@ export async function POST(
       .eq("id", id)
       .single();
 
-    if (clientError || !client) {
+    if (clientError || !data) {
       return NextResponse.json(
         { ok: false, error: clientError?.message || "Cliente no encontrado" },
         { status: 404 }
       );
     }
+
+    const client = data as ClientRow;
 
     const storePlatform = cleanStr(client.store_platform || "none").toLowerCase();
     const authMode = cleanStr(client.shopify_auth_mode || "token").toLowerCase();
