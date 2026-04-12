@@ -14,6 +14,13 @@ function isValidSlug(slug: string) {
   return /^[a-zA-Z0-9_-]+$/.test(slug);
 }
 
+function normalizeBool(v: any, fallback = false) {
+  if (typeof v === "boolean") return v;
+  if (v === "true" || v === "1" || v === 1) return true;
+  if (v === "false" || v === "0" || v === 0) return false;
+  return fallback;
+}
+
 export async function GET() {
   try {
     const db = supabaseAdmin();
@@ -131,6 +138,19 @@ export async function POST(req: Request) {
       default_url: cleanStr(body.default_url),
       locale: cleanStr(body.locale) || "es",
       archived: false,
+
+      store_platform: cleanStr(body.store_platform) || "none",
+      store_status: cleanStr(body.store_status) || "not_connected",
+      shopify_store_domain: cleanStr(body.shopify_store_domain),
+      shopify_access_token: cleanStr(body.shopify_access_token),
+      shopify_auth_mode: cleanStr(body.shopify_auth_mode) || "token",
+      shopify_client_id: cleanStr(body.shopify_client_id),
+      shopify_client_secret: cleanStr(body.shopify_client_secret),
+      store_import_enabled: normalizeBool(body.store_import_enabled, false),
+      store_import_mode: cleanStr(body.store_import_mode) || "facelens_only",
+      store_import_filters: cleanStr(body.store_import_filters),
+      last_store_sync_at: cleanStr(body.last_store_sync_at),
+      last_store_sync_result: cleanStr(body.last_store_sync_result),
     };
 
     const { data, error } = await db

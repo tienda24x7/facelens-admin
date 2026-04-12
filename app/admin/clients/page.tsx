@@ -19,6 +19,19 @@ type ClientRow = {
   default_url?: string | null;
   metrics_token?: string | null;
   locale?: string | null;
+
+  store_platform?: string | null;
+  store_status?: string | null;
+  shopify_store_domain?: string | null;
+  shopify_access_token?: string | null;
+  shopify_auth_mode?: string | null;
+  shopify_client_id?: string | null;
+  shopify_client_secret?: string | null;
+  store_import_enabled?: boolean | null;
+  store_import_mode?: string | null;
+  store_import_filters?: string | null;
+  last_store_sync_at?: string | null;
+  last_store_sync_result?: string | null;
 };
 
 type PlanRow = {
@@ -33,6 +46,10 @@ const FACELENS_LIVE_BASE_URL = "https://facelens-live.vercel.app";
 const FACELENS_PANEL_BASE_URL = "https://facelens-panel.vercel.app";
 const CATALOG_SCOPE_OPTIONS = ["ALL", "NICOLAS", "EZEQUIEL"];
 const LOCALE_OPTIONS = ["es", "en", "pt-BR"];
+const STORE_PLATFORM_OPTIONS = ["none", "shopify", "tiendanube", "custom"];
+const STORE_STATUS_OPTIONS = ["not_connected", "connected", "error"];
+const STORE_IMPORT_MODE_OPTIONS = ["facelens_only", "shopify_fallback"];
+const SHOPIFY_AUTH_MODE_OPTIONS = ["token", "app_credentials"];
 
 function slugify(v: string) {
   return (v || "")
@@ -75,6 +92,33 @@ function buildDashboardUrl(
   const t = cleanStr(metricsToken);
   if (!s || !t) return "";
   return `${FACELENS_PANEL_BASE_URL}/?slug=${encodeURIComponent(s)}&t=${encodeURIComponent(t)}&days=30`;
+}
+
+function platformLabel(value?: string | null) {
+  const v = cleanStr(value);
+  if (v === "shopify") return "Shopify";
+  if (v === "tiendanube") return "Tiendanube";
+  if (v === "custom") return "Web propia";
+  return "Sin tienda";
+}
+
+function storeStatusLabel(value?: string | null) {
+  const v = cleanStr(value);
+  if (v === "connected") return "Conectada";
+  if (v === "error") return "Error";
+  return "No conectada";
+}
+
+function importModeLabel(value?: string | null) {
+  const v = cleanStr(value);
+  if (v === "shopify_fallback") return "Usar imagen importada como fallback";
+  return "Solo assets FaceLens";
+}
+
+function shopifyAuthModeLabel(value?: string | null) {
+  const v = cleanStr(value);
+  if (v === "app_credentials") return "App nueva (client id / secret)";
+  return "Token directo";
 }
 
 const styles = {
@@ -298,6 +342,8 @@ export default function ClientsPage() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [archivingId, setArchivingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [testingStoreId, setTestingStoreId] = useState<string | null>(null);
+  const [importingStoreId, setImportingStoreId] = useState<string | null>(null);
 
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [logoFileById, setLogoFileById] = useState<Record<string, File | null>>({});
@@ -326,6 +372,19 @@ export default function ClientsPage() {
     olor_secundario: string;
     locale: string;
     slugTouched: boolean;
+
+    store_platform: string;
+    store_status: string;
+    shopify_store_domain: string;
+    shopify_access_token: string;
+    shopify_auth_mode: string;
+    shopify_client_id: string;
+    shopify_client_secret: string;
+    store_import_enabled: boolean;
+    store_import_mode: string;
+    store_import_filters: string;
+    last_store_sync_at: string;
+    last_store_sync_result: string;
   }>({
     nombre: "",
     slug: "",
@@ -342,6 +401,19 @@ export default function ClientsPage() {
     olor_secundario: "#0F0F0F",
     locale: "es",
     slugTouched: false,
+
+    store_platform: "none",
+    store_status: "not_connected",
+    shopify_store_domain: "",
+    shopify_access_token: "",
+    shopify_auth_mode: "token",
+    shopify_client_id: "",
+    shopify_client_secret: "",
+    store_import_enabled: false,
+    store_import_mode: "facelens_only",
+    store_import_filters: "lentes, sunglasses, eyewear",
+    last_store_sync_at: "",
+    last_store_sync_result: "",
   });
 
   const planOptions = useMemo(() => {
@@ -402,6 +474,94 @@ export default function ClientsPage() {
       setTimeout(() => setCopiedKey(""), 1800);
     } catch (e: any) {
       setErr(e?.message || "No se pudo copiar");
+    }
+  }
+
+  async function showPendingStoreAction(actionLabel: string) {
+    setErr(null);
+    setInfo(`ℹ️ ${actionLabel} quedará habilitado cuando armemos el backend de integración.`);
+  }
+
+  async function testShopifyConnection(row: ClientRow) {
+  try {
+    setTestingStoreId(row.id);
+    setErr(null);
+    setInfo(null);
+
+    const response = await fetch(`/api/admin/clients/${row.id}/shopify-test`, {
+      method: "POST",
+    });
+
+    const json = await response.json().catch(() => ({}));
+
+    if (!response.ok || !json?.ok) {
+      throw new Error(
+        json?.detail ||
+          json?.error ||
+          "No se pudo probar la conexión Shopify."
+      );
+    }
+
+    const productsFound = Number(json?.sample?.products_found || 0);
+    const domain = cleanStr(json?.shop?.domain);
+    const firstTitles = Array.isArray(json?.sample?.first_products)
+      ? json.sample.first_products
+          .map((p: any) => cleanStr(p?.title))
+          .filter(Boolean)
+          .slice(0, 3)
+      : [];
+
+    const preview =
+      firstTitles.length > 0 ? ` • Ejemplos: ${firstTitles.join(" | ")}` : "";
+
+    setInfo(
+      `✅ Conexión Shopify OK para ${cleanStr(row.nombre || row.slug || row.id)} • Dominio: ${domain || "—"} • Productos muestra: ${productsFound}${preview}`
+    );
+  } catch (e: any) {
+    setErr(e?.message || "No se pudo probar la conexión Shopify.");
+  } finally {
+    setTestingStoreId(null);
+  }
+}
+
+  async function importShopifyProducts(row: ClientRow) {
+    try {
+      const storePlatform = cleanStr(row.store_platform).toLowerCase();
+      if (storePlatform !== "shopify") {
+        throw new Error("El cliente no tiene Shopify configurado como plataforma.");
+      }
+
+      setImportingStoreId(row.id);
+      setErr(null);
+      setInfo(null);
+
+      const response = await fetch(`/api/admin/clients/${row.id}/shopify-import`, {
+        method: "POST",
+      });
+
+      const json = await response.json().catch(() => ({}));
+
+      if (!response.ok || !json?.ok) {
+        throw new Error(
+          json?.error ||
+            json?.detail ||
+            "No se pudo importar productos desde Shopify."
+        );
+      }
+
+      const importedCount = Number(json?.imported_count || 0);
+      const productsFound = Number(json?.products_found || 0);
+      const productsFiltered = Number(json?.products_filtered || 0);
+
+      setInfo(
+        `✅ Importación Shopify OK para ${cleanStr(row.nombre || row.slug || row.id)} • Productos leídos: ${productsFound} • Filtrados: ${productsFiltered} • Guardados: ${importedCount}`
+      );
+
+      await load();
+    } catch (e: any) {
+      setErr(e?.message || "No se pudo importar productos desde Shopify.");
+    } finally {
+      setImportingStoreId(null);
     }
   }
 
@@ -620,6 +780,19 @@ export default function ClientsPage() {
         color_primario,
         olor_secundario,
         locale: createForm.locale.trim() || "es",
+
+        store_platform: createForm.store_platform.trim() || "none",
+        store_status: createForm.store_status.trim() || "not_connected",
+        shopify_store_domain: createForm.shopify_store_domain.trim() || null,
+        shopify_access_token: createForm.shopify_access_token.trim() || null,
+        shopify_auth_mode: createForm.shopify_auth_mode.trim() || "token",
+        shopify_client_id: createForm.shopify_client_id.trim() || null,
+        shopify_client_secret: createForm.shopify_client_secret.trim() || null,
+        store_import_enabled: !!createForm.store_import_enabled,
+        store_import_mode: createForm.store_import_mode.trim() || "facelens_only",
+        store_import_filters: createForm.store_import_filters.trim() || null,
+        last_store_sync_at: createForm.last_store_sync_at.trim() || null,
+        last_store_sync_result: createForm.last_store_sync_result.trim() || null,
       };
 
       const r = await fetch("/api/admin/clients", {
@@ -648,6 +821,19 @@ export default function ClientsPage() {
         olor_secundario: "#0F0F0F",
         locale: "es",
         slugTouched: false,
+
+        store_platform: "none",
+        store_status: "not_connected",
+        shopify_store_domain: "",
+        shopify_access_token: "",
+        shopify_auth_mode: "token",
+        shopify_client_id: "",
+        shopify_client_secret: "",
+        store_import_enabled: false,
+        store_import_mode: "facelens_only",
+        store_import_filters: "lentes, sunglasses, eyewear",
+        last_store_sync_at: "",
+        last_store_sync_result: "",
       });
 
       await load();
@@ -886,6 +1072,178 @@ export default function ClientsPage() {
             </button>
           </div>
         </div>
+
+        <div style={{ ...styles.sectionBox, marginTop: 14 }}>
+          <div style={styles.sectionBoxTitle}>Tienda conectada</div>
+
+          <div style={{ ...styles.row, alignItems: "flex-start" }}>
+            <div style={{ ...styles.fieldWrap, minWidth: 170 }}>
+              <div style={styles.label}>Plataforma</div>
+              <select
+                value={createForm.store_platform}
+                onChange={(e) => setCreateForm((p) => ({ ...p, store_platform: e.target.value }))}
+                style={{ ...styles.select, width: 170 }}
+              >
+                {STORE_PLATFORM_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {platformLabel(option)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ ...styles.fieldWrap, minWidth: 170 }}>
+              <div style={styles.label}>Estado conexión</div>
+              <select
+                value={createForm.store_status}
+                onChange={(e) => setCreateForm((p) => ({ ...p, store_status: e.target.value }))}
+                style={{ ...styles.select, width: 170 }}
+              >
+                {STORE_STATUS_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {storeStatusLabel(option)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ ...styles.fieldWrap, minWidth: 190 }}>
+              <div style={styles.label}>Modo auth Shopify</div>
+              <select
+                value={createForm.shopify_auth_mode}
+                onChange={(e) => setCreateForm((p) => ({ ...p, shopify_auth_mode: e.target.value }))}
+                style={{ ...styles.select, width: 190 }}
+              >
+                {SHOPIFY_AUTH_MODE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {shopifyAuthModeLabel(option)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ ...styles.fieldWrap, minWidth: 260, flex: "1 1 260px" }}>
+              <div style={styles.label}>Dominio Shopify</div>
+              <input
+                value={createForm.shopify_store_domain}
+                onChange={(e) => setCreateForm((p) => ({ ...p, shopify_store_domain: e.target.value }))}
+                style={{ ...styles.input, width: "100%" }}
+                placeholder="mitienda.myshopify.com"
+              />
+            </div>
+
+            {createForm.shopify_auth_mode === "token" ? (
+              <div style={{ ...styles.fieldWrap, minWidth: 260, flex: "1 1 260px" }}>
+                <div style={styles.label}>Access token Shopify</div>
+                <input
+                  type="password"
+                  value={createForm.shopify_access_token}
+                  onChange={(e) => setCreateForm((p) => ({ ...p, shopify_access_token: e.target.value }))}
+                  style={{ ...styles.input, width: "100%" }}
+                  placeholder="shpat_..."
+                />
+              </div>
+            ) : (
+              <>
+                <div style={{ ...styles.fieldWrap, minWidth: 240, flex: "1 1 240px" }}>
+                  <div style={styles.label}>Shopify client id</div>
+                  <input
+                    value={createForm.shopify_client_id}
+                    onChange={(e) => setCreateForm((p) => ({ ...p, shopify_client_id: e.target.value }))}
+                    style={{ ...styles.input, width: "100%" }}
+                    placeholder="client id"
+                  />
+                </div>
+
+                <div style={{ ...styles.fieldWrap, minWidth: 240, flex: "1 1 240px" }}>
+                  <div style={styles.label}>Shopify client secret</div>
+                  <input
+                    type="password"
+                    value={createForm.shopify_client_secret}
+                    onChange={(e) => setCreateForm((p) => ({ ...p, shopify_client_secret: e.target.value }))}
+                    style={{ ...styles.input, width: "100%" }}
+                    placeholder="client secret"
+                  />
+                </div>
+              </>
+            )}
+
+            <div style={{ ...styles.fieldWrap, minWidth: 220 }}>
+              <div style={styles.label}>Modo visual</div>
+              <select
+                value={createForm.store_import_mode}
+                onChange={(e) => setCreateForm((p) => ({ ...p, store_import_mode: e.target.value }))}
+                style={{ ...styles.select, width: 220 }}
+              >
+                {STORE_IMPORT_MODE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {importModeLabel(option)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ ...styles.fieldWrap, minWidth: 220, flex: "1 1 280px" }}>
+              <div style={styles.label}>Filtros importación</div>
+              <input
+                value={createForm.store_import_filters}
+                onChange={(e) => setCreateForm((p) => ({ ...p, store_import_filters: e.target.value }))}
+                style={{ ...styles.input, width: "100%" }}
+                placeholder="lentes, sunglasses, eyewear"
+              />
+            </div>
+
+            <div style={{ ...styles.fieldWrap, minWidth: 180 }}>
+              <div style={styles.label}>Importación habilitada</div>
+              <label style={styles.checkboxLabel}>
+                <input
+                  type="checkbox"
+                  checked={!!createForm.store_import_enabled}
+                  onChange={(e) => setCreateForm((p) => ({ ...p, store_import_enabled: e.target.checked }))}
+                />
+                {createForm.store_import_enabled ? "Sí" : "No"}
+              </label>
+            </div>
+          </div>
+
+          <div style={{ ...styles.row, marginTop: 12 }}>
+            <button
+              onClick={() => showPendingStoreAction("Probar conexión")}
+              disabled
+              style={{ ...styles.buttonSecondary, opacity: 0.6, cursor: "not-allowed" }}
+            >
+              Probar conexión
+            </button>
+
+            <button
+              onClick={() => showPendingStoreAction("Importar productos")}
+              disabled
+              style={{ ...styles.buttonSecondary, opacity: 0.6, cursor: "not-allowed" }}
+            >
+              Importar productos
+            </button>
+
+            <button
+              onClick={() => showPendingStoreAction("Actualizar catálogo")}
+              disabled
+              style={{ ...styles.buttonSecondary, opacity: 0.6, cursor: "not-allowed" }}
+            >
+              Actualizar catálogo
+            </button>
+
+            <button
+              onClick={() => showPendingStoreAction("Desconectar tienda")}
+              disabled
+              style={{ ...styles.buttonSecondary, opacity: 0.6, cursor: "not-allowed" }}
+            >
+              Desconectar
+            </button>
+
+            <div style={{ fontSize: 12, color: "#6b7280" }}>
+              Estos botones se activan cuando armemos el backend de integración.
+            </div>
+          </div>
+        </div>
       </div>
 
       {err && <div style={styles.infoError}>Error: {err}</div>}
@@ -1020,11 +1378,16 @@ export default function ClientsPage() {
                 );
 
                 const hasChangesRow = Object.keys(draft[r.id] || {}).length > 0;
-                const isBusy = savingId === r.id || archivingId === r.id;
+                const isBusy =
+                  savingId === r.id ||
+                  archivingId === r.id ||
+                  testingStoreId === r.id ||
+                  importingStoreId === r.id;
                 const isExpanded = expandedId === r.id;
 
                 const currentPrimary = normalizeHexColor(getValue(r, "color_primario"), "#111111");
                 const currentSecondary = normalizeHexColor(getValue(r, "olor_secundario"), "#0F0F0F");
+                const currentStorePlatform = cleanStr(getValue(r, "store_platform")).toLowerCase();
 
                 return (
                   <>
@@ -1312,6 +1675,232 @@ export default function ClientsPage() {
                                       />
                                     </div>
                                   </div>
+                                </div>
+                              </div>
+
+                              <div style={styles.sectionBox}>
+                                <div style={styles.sectionBoxTitle}>Tienda conectada</div>
+
+                                <div style={{ ...styles.row, alignItems: "flex-start" }}>
+                                  <div style={{ ...styles.fieldWrap, minWidth: 170 }}>
+                                    <div style={styles.label}>Plataforma</div>
+                                    <select
+                                      value={String(getValue(r, "store_platform") ?? "none")}
+                                      onChange={(e) => setField(r.id, "store_platform", e.target.value)}
+                                      style={{ ...styles.select, width: 170 }}
+                                    >
+                                      {STORE_PLATFORM_OPTIONS.map((option) => (
+                                        <option key={option} value={option}>
+                                          {platformLabel(option)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  <div style={{ ...styles.fieldWrap, minWidth: 170 }}>
+                                    <div style={styles.label}>Estado conexión</div>
+                                    <select
+                                      value={String(getValue(r, "store_status") ?? "not_connected")}
+                                      onChange={(e) => setField(r.id, "store_status", e.target.value)}
+                                      style={{ ...styles.select, width: 170 }}
+                                    >
+                                      {STORE_STATUS_OPTIONS.map((option) => (
+                                        <option key={option} value={option}>
+                                          {storeStatusLabel(option)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  <div style={{ ...styles.fieldWrap, minWidth: 190 }}>
+                                    <div style={styles.label}>Modo auth Shopify</div>
+                                    <select
+                                      value={String(getValue(r, "shopify_auth_mode") ?? "token")}
+                                      onChange={(e) => setField(r.id, "shopify_auth_mode", e.target.value)}
+                                      style={{ ...styles.select, width: 190 }}
+                                    >
+                                      {SHOPIFY_AUTH_MODE_OPTIONS.map((option) => (
+                                        <option key={option} value={option}>
+                                          {shopifyAuthModeLabel(option)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  <div style={{ ...styles.fieldWrap, minWidth: 260, flex: "1 1 260px" }}>
+                                    <div style={styles.label}>Dominio Shopify</div>
+                                    <input
+                                      value={String(getValue(r, "shopify_store_domain") ?? "")}
+                                      onChange={(e) => setField(r.id, "shopify_store_domain", e.target.value)}
+                                      style={{ ...styles.input, width: "100%" }}
+                                      placeholder="mitienda.myshopify.com"
+                                    />
+                                  </div>
+
+                                  {String(getValue(r, "shopify_auth_mode") ?? "token") === "token" ? (
+                                    <div style={{ ...styles.fieldWrap, minWidth: 260, flex: "1 1 260px" }}>
+                                      <div style={styles.label}>Access token Shopify</div>
+                                      <input
+                                        type="password"
+                                        value={String(getValue(r, "shopify_access_token") ?? "")}
+                                        onChange={(e) => setField(r.id, "shopify_access_token", e.target.value)}
+                                        style={{ ...styles.input, width: "100%" }}
+                                        placeholder="shpat_..."
+                                      />
+                                    </div>
+                                  ) : (
+                                    <>
+                                      <div style={{ ...styles.fieldWrap, minWidth: 240, flex: "1 1 240px" }}>
+                                        <div style={styles.label}>Shopify client id</div>
+                                        <input
+                                          value={String(getValue(r, "shopify_client_id") ?? "")}
+                                          onChange={(e) => setField(r.id, "shopify_client_id", e.target.value)}
+                                          style={{ ...styles.input, width: "100%" }}
+                                          placeholder="client id"
+                                        />
+                                      </div>
+
+                                      <div style={{ ...styles.fieldWrap, minWidth: 240, flex: "1 1 240px" }}>
+                                        <div style={styles.label}>Shopify client secret</div>
+                                        <input
+                                          type="password"
+                                          value={String(getValue(r, "shopify_client_secret") ?? "")}
+                                          onChange={(e) => setField(r.id, "shopify_client_secret", e.target.value)}
+                                          style={{ ...styles.input, width: "100%" }}
+                                          placeholder="client secret"
+                                        />
+                                      </div>
+                                    </>
+                                  )}
+
+                                  <div style={{ ...styles.fieldWrap, minWidth: 220 }}>
+                                    <div style={styles.label}>Modo visual</div>
+                                    <select
+                                      value={String(getValue(r, "store_import_mode") ?? "facelens_only")}
+                                      onChange={(e) => setField(r.id, "store_import_mode", e.target.value)}
+                                      style={{ ...styles.select, width: 220 }}
+                                    >
+                                      {STORE_IMPORT_MODE_OPTIONS.map((option) => (
+                                        <option key={option} value={option}>
+                                          {importModeLabel(option)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  <div style={{ ...styles.fieldWrap, minWidth: 260, flex: "1 1 260px" }}>
+                                    <div style={styles.label}>Filtros importación</div>
+                                    <input
+                                      value={String(getValue(r, "store_import_filters") ?? "")}
+                                      onChange={(e) => setField(r.id, "store_import_filters", e.target.value)}
+                                      style={{ ...styles.input, width: "100%" }}
+                                      placeholder="lentes, sunglasses, eyewear"
+                                    />
+                                  </div>
+
+                                  <div style={{ ...styles.fieldWrap, minWidth: 180 }}>
+                                    <div style={styles.label}>Importación habilitada</div>
+                                    <label style={styles.checkboxLabel}>
+                                      <input
+                                        type="checkbox"
+                                        checked={!!getValue(r, "store_import_enabled")}
+                                        onChange={(e) => setField(r.id, "store_import_enabled", e.target.checked)}
+                                      />
+                                      {!!getValue(r, "store_import_enabled") ? "Sí" : "No"}
+                                    </label>
+                                  </div>
+
+                                  <div style={{ ...styles.fieldWrap, minWidth: 220 }}>
+                                    <div style={styles.label}>Última importación</div>
+                                    <input
+                                      value={String(getValue(r, "last_store_sync_at") ?? "")}
+                                      onChange={(e) => setField(r.id, "last_store_sync_at", e.target.value)}
+                                      style={{ ...styles.input, width: 220 }}
+                                      placeholder="Solo lectura por ahora"
+                                    />
+                                  </div>
+
+                                  <div style={{ ...styles.fieldWrap, minWidth: 280, flex: "1 1 280px" }}>
+                                    <div style={styles.label}>Resultado última importación</div>
+                                    <input
+                                      value={String(getValue(r, "last_store_sync_result") ?? "")}
+                                      onChange={(e) => setField(r.id, "last_store_sync_result", e.target.value)}
+                                      style={{ ...styles.input, width: "100%" }}
+                                      placeholder="OK / Error / 42 productos importados"
+                                    />
+                                  </div>
+                                </div>
+
+                                <div style={{ ...styles.row, marginTop: 12 }}>
+                                  <button
+                                    onClick={() => testShopifyConnection({
+                                      ...r,
+                                      ...(draft[r.id] || {}),
+                                    })}
+                                    disabled={
+                                      testingStoreId === r.id ||
+                                      currentStorePlatform !== "shopify"
+                                    }
+                                    style={{
+                                      ...styles.buttonSecondary,
+                                      opacity:
+                                        testingStoreId === r.id || currentStorePlatform !== "shopify"
+                                          ? 0.6
+                                          : 1,
+                                      cursor:
+                                        testingStoreId === r.id
+                                          ? "wait"
+                                          : currentStorePlatform !== "shopify"
+                                          ? "not-allowed"
+                                          : "pointer",
+                                    }}
+                                  >
+                                    {testingStoreId === r.id ? "Probando..." : "Probar conexión"}
+                                  </button>
+
+                                  <button
+                                    onClick={() =>
+                                      importShopifyProducts({
+                                        ...r,
+                                        ...(draft[r.id] || {}),
+                                      })
+                                    }
+                                    disabled={
+                                      importingStoreId === r.id ||
+                                      currentStorePlatform !== "shopify"
+                                    }
+                                    style={{
+                                      ...styles.buttonSecondary,
+                                      opacity:
+                                        importingStoreId === r.id || currentStorePlatform !== "shopify"
+                                          ? 0.6
+                                          : 1,
+                                      cursor:
+                                        importingStoreId === r.id
+                                          ? "wait"
+                                          : currentStorePlatform !== "shopify"
+                                          ? "not-allowed"
+                                          : "pointer",
+                                    }}
+                                  >
+                                    {importingStoreId === r.id ? "Importando..." : "Importar productos"}
+                                  </button>
+
+                                  <button
+                                    onClick={() => showPendingStoreAction(`Actualizar catálogo de ${cleanStr(getValue(r, "nombre") || getValue(r, "slug") || r.id)}`)}
+                                    disabled
+                                    style={{ ...styles.buttonSecondary, opacity: 0.6, cursor: "not-allowed" }}
+                                  >
+                                    Actualizar catálogo
+                                  </button>
+
+                                  <button
+                                    onClick={() => showPendingStoreAction(`Desconectar tienda de ${cleanStr(getValue(r, "nombre") || getValue(r, "slug") || r.id)}`)}
+                                    disabled
+                                    style={{ ...styles.buttonSecondary, opacity: 0.6, cursor: "not-allowed" }}
+                                  >
+                                    Desconectar
+                                  </button>
                                 </div>
                               </div>
 

@@ -18,6 +18,19 @@ const ALLOWED = new Set([
   "default_url",
   "locale",
   "archived",
+
+  "store_platform",
+  "store_status",
+  "shopify_store_domain",
+  "shopify_access_token",
+  "shopify_auth_mode",
+  "shopify_client_id",
+  "shopify_client_secret",
+  "store_import_enabled",
+  "store_import_mode",
+  "store_import_filters",
+  "last_store_sync_at",
+  "last_store_sync_result",
 ]);
 
 function pickAllowed(obj: any) {
