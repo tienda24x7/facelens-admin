@@ -43,6 +43,26 @@ function jsonWithCors(body: any, status = 200) {
   return withCors(NextResponse.json(body, { status }));
 }
 
+function toImportedRows(value: unknown): ImportedRow[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.map((row: any) => ({
+    cliente_id: cleanStr(row?.cliente_id),
+    sku: cleanStr(row?.sku) || null,
+    titulo: cleanStr(row?.titulo) || null,
+    facelens_sku: cleanStr(row?.facelens_sku) || null,
+    external_product_id: cleanStr(row?.external_product_id) || null,
+    external_variant_id: cleanStr(row?.external_variant_id) || null,
+    preview_review_status: cleanStr(row?.preview_review_status) || null,
+    preview_resolution: cleanStr(row?.preview_resolution) || null,
+    imported_preview_approved:
+      row?.imported_preview_approved === true ? true : row?.imported_preview_approved === false ? false : null,
+    approved_image_url: cleanStr(row?.approved_image_url) || null,
+    live_visual_mode: cleanStr(row?.live_visual_mode) || null,
+    live_enabled: row?.live_enabled === true ? true : row?.live_enabled === false ? false : null,
+  }));
+}
+
 export async function OPTIONS() {
   return withCors(new NextResponse(null, { status: 204 }));
 }
@@ -128,7 +148,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const rows: ImportedRow[] = Array.isArray(importedRows) ? (importedRows as ImportedRow[]) : [];
+    const rows = toImportedRows(importedRows);
 
     const approvedRows = rows.filter((row) => {
       return (
