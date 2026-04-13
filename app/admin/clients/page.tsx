@@ -44,7 +44,7 @@ type StatusFilter = "all" | "active" | "inactive";
 
 const FACELENS_LIVE_BASE_URL = "https://facelens-live.vercel.app";
 const FACELENS_PANEL_BASE_URL = "https://facelens-panel.vercel.app";
-const CATALOG_SCOPE_OPTIONS = ["ALL", "NICOLAS", "EZEQUIEL"];
+const DEFAULT_CATALOG_SCOPE_OPTIONS = ["ALL", "NICOLAS", "EZEQUIEL"];
 const LOCALE_OPTIONS = ["es", "en", "pt-BR"];
 const STORE_PLATFORM_OPTIONS = ["none", "shopify", "tiendanube", "custom"];
 const STORE_STATUS_OPTIONS = ["not_connected", "connected", "error"];
@@ -335,6 +335,7 @@ const styles = {
 export default function ClientsPage() {
   const [rows, setRows] = useState<ClientRow[]>([]);
   const [plans, setPlans] = useState<PlanRow[]>([]);
+  const [catalogScopeOptions, setCatalogScopeOptions] = useState<string[]>(DEFAULT_CATALOG_SCOPE_OPTIONS);
   const [draft, setDraft] = useState<Record<string, Partial<ClientRow>>>({});
   const [err, setErr] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -483,46 +484,46 @@ export default function ClientsPage() {
   }
 
   async function testShopifyConnection(row: ClientRow) {
-  try {
-    setTestingStoreId(row.id);
-    setErr(null);
-    setInfo(null);
+    try {
+      setTestingStoreId(row.id);
+      setErr(null);
+      setInfo(null);
 
-    const response = await fetch(`/api/admin/clients/${row.id}/shopify-test`, {
-      method: "POST",
-    });
+      const response = await fetch(`/api/admin/clients/${row.id}/shopify-test`, {
+        method: "POST",
+      });
 
-    const json = await response.json().catch(() => ({}));
+      const json = await response.json().catch(() => ({}));
 
-    if (!response.ok || !json?.ok) {
-      throw new Error(
-        json?.detail ||
-          json?.error ||
-          "No se pudo probar la conexión Shopify."
+      if (!response.ok || !json?.ok) {
+        throw new Error(
+          json?.detail ||
+            json?.error ||
+            "No se pudo probar la conexión Shopify."
+        );
+      }
+
+      const productsFound = Number(json?.sample?.products_found || 0);
+      const domain = cleanStr(json?.shop?.domain);
+      const firstTitles = Array.isArray(json?.sample?.first_products)
+        ? json.sample.first_products
+            .map((p: any) => cleanStr(p?.title))
+            .filter(Boolean)
+            .slice(0, 3)
+        : [];
+
+      const preview =
+        firstTitles.length > 0 ? ` • Ejemplos: ${firstTitles.join(" | ")}` : "";
+
+      setInfo(
+        `✅ Conexión Shopify OK para ${cleanStr(row.nombre || row.slug || row.id)} • Dominio: ${domain || "—"} • Productos muestra: ${productsFound}${preview}`
       );
+    } catch (e: any) {
+      setErr(e?.message || "No se pudo probar la conexión Shopify.");
+    } finally {
+      setTestingStoreId(null);
     }
-
-    const productsFound = Number(json?.sample?.products_found || 0);
-    const domain = cleanStr(json?.shop?.domain);
-    const firstTitles = Array.isArray(json?.sample?.first_products)
-      ? json.sample.first_products
-          .map((p: any) => cleanStr(p?.title))
-          .filter(Boolean)
-          .slice(0, 3)
-      : [];
-
-    const preview =
-      firstTitles.length > 0 ? ` • Ejemplos: ${firstTitles.join(" | ")}` : "";
-
-    setInfo(
-      `✅ Conexión Shopify OK para ${cleanStr(row.nombre || row.slug || row.id)} • Dominio: ${domain || "—"} • Productos muestra: ${productsFound}${preview}`
-    );
-  } catch (e: any) {
-    setErr(e?.message || "No se pudo probar la conexión Shopify.");
-  } finally {
-    setTestingStoreId(null);
   }
-}
 
   async function importShopifyProducts(row: ClientRow) {
     try {
@@ -855,6 +856,23 @@ export default function ClientsPage() {
     }
   }, [planOptions, createForm.plan]);
 
+  useEffect(() => {
+    const set = new Set<string>(DEFAULT_CATALOG_SCOPE_OPTIONS);
+
+    rows.forEach((r) => {
+      const value = cleanStr((draft[r.id]?.catalog_scope as string) ?? r.catalog_scope);
+      if (value) set.add(value.toUpperCase());
+    });
+
+    setCatalogScopeOptions(
+      Array.from(set).sort((a, b) => {
+        if (a === "ALL") return -1;
+        if (b === "ALL") return 1;
+        return a.localeCompare(b, "es");
+      })
+    );
+  }, [rows, draft]);
+
   return (
     <div style={styles.page}>
       <h1 style={styles.pageTitle}>Clientes</h1>
@@ -950,7 +968,7 @@ export default function ClientsPage() {
               onChange={(e) => setCreateForm((p) => ({ ...p, catalog_scope: e.target.value }))}
               style={{ ...styles.select, width: 170 }}
             >
-              {CATALOG_SCOPE_OPTIONS.map((scope) => (
+              {catalogScopeOptions.map((scope) => (
                 <option key={scope} value={scope}>
                   {scope}
                 </option>
@@ -1587,7 +1605,7 @@ export default function ClientsPage() {
                                       onChange={(e) => setField(r.id, "catalog_scope", e.target.value)}
                                       style={{ ...styles.select, width: 160 }}
                                     >
-                                      {CATALOG_SCOPE_OPTIONS.map((scope) => (
+                                      {catalogScopeOptions.map((scope) => (
                                         <option key={scope} value={scope}>
                                           {scope}
                                         </option>

@@ -354,24 +354,27 @@ async function getAllowedUniverseForClient(client: ClientRow): Promise<AllowedUn
     throw new Error(`Error leyendo lentes: ${lensErr.message}`);
   }
 
-  const skuByLensId = new Map<string, string>();
-  const lensIdBySku = new Map<string, string>();
+ const rawSkuByLensId = new Map<string, string>();
+const normalizedSkuByLensId = new Map<string, string>();
 
-  for (const row of lensRows || []) {
-    const lensId = String(row.id || "");
-    const sku = normalizeSku(row.sku);
-    if (!lensId || !sku) continue;
-    skuByLensId.set(lensId, sku);
-    lensIdBySku.set(sku, lensId);
-  }
+for (const row of lensRows || []) {
+  const lensId = String(row.id || "");
+  const rawSku = cleanStr(row.sku);
+  const normalizedSku = normalizeSku(row.sku);
 
-  const skus = Array.from(lensIdBySku.keys());
-  if (!skus.length) return [];
+  if (!lensId || !rawSku || !normalizedSku) continue;
 
-  const { data: importRows, error: importErr } = await supabase
-    .from("import_lentes")
-    .select("sku, rb, nombre_modelo, categoria, proveedor, grupo, activo")
-    .in("sku", skus);
+  rawSkuByLensId.set(lensId, rawSku);
+  normalizedSkuByLensId.set(lensId, normalizedSku);
+}
+
+const rawSkus = Array.from(rawSkuByLensId.values());
+if (!rawSkus.length) return [];
+
+const { data: importRows, error: importErr } = await supabase
+  .from("import_lentes")
+  .select("sku, rb, nombre_modelo, categoria, proveedor, grupo, activo")
+  .in("sku", rawSkus);
 
   if (importErr) {
     throw new Error(`Error leyendo import_lentes: ${importErr.message}`);
@@ -386,15 +389,15 @@ async function getAllowedUniverseForClient(client: ClientRow): Promise<AllowedUn
   const out: AllowedUniverseRow[] = [];
 
   for (const lensId of lensIds) {
-    const sku = skuByLensId.get(lensId);
-    if (!sku) continue;
+  const normalizedSku = normalizedSkuByLensId.get(lensId);
+  if (!normalizedSku) continue;
 
-    const imp = importBySku.get(sku);
-    if (!imp) continue;
+  const imp = importBySku.get(normalizedSku);
+  if (!imp) continue;
 
     out.push({
       lens_id: lensId,
-      sku,
+      sku: normalizedSku,
       rb: String(imp.rb || "").trim(),
       nombre: String(imp.nombre_modelo || "").trim(),
       categoria: String(imp.categoria || "").trim(),
